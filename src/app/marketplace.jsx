@@ -12,7 +12,7 @@ import {
 
 import { useRouter } from 'expo-router';
 import { searchMarketplaceMedicines } from '../services/api';
-const BASE_URL = 'http://192.168.89.124:5000/api';
+const BASE_URL = 'https://medtracker-1.onrender.com/api';
 
 export default function Marketplace() {
   const router = useRouter();

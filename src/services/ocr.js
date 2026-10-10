@@ -2,7 +2,7 @@ import { File } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import { getData } from './storage';
 
-const BACKEND_URL = 'http://192.168.89.124:5000';
+const BACKEND_URL = 'https://medtracker-1.onrender.com';
 
 // =====================================================
 // PICK MEDICINE IMAGE FROM GALLERY

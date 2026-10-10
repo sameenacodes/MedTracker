@@ -29,14 +29,14 @@ const axios = require('axios');
  *
  * Example:
  *
- * API_BASE_URL=http://localhost:5000/api
+ * API_BASE_URL=https://medtracker-1.onrender.com/api
  *
  * ------------------------------------------------------------
  */
 
 const API_BASE_URL =
   process.env.API_BASE_URL ||
-  'http://localhost:5000/api';
+  'https://medtracker-1.onrender.com/api';
 
 
 /**

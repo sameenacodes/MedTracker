@@ -25,7 +25,7 @@ import {
   uploadPrescription,
 } from '../services/api';
 
-const BASE_URL = 'http://192.168.89.124:5000';
+const BASE_URL = 'https://medtracker-1.onrender.com';
 
 export default function Prescriptions() {
   const router = useRouter();

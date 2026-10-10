@@ -509,7 +509,7 @@ mongoose
         );
 
         console.log(
-          `📱 Mobile API: http://192.168.194.124:${PORT}/api`
+          `🌐 Public API: https://medtracker-1.onrender.com/api`
         );
 
       }

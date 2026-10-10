@@ -23,8 +23,8 @@ import { getData } from "../services/storage";
 
 const BASE_URL =
   Platform.OS === "web"
-    ? "http://localhost:5000/api"
-    : "http://192.168.89.124:5000/api";
+    ? "https://medtracker-1.onrender.com/api"
+    : "https://medtracker-1.onrender.com/api";
 
 
 // ======================================================

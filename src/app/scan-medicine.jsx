@@ -1,23 +1,23 @@
 import {
-    useEffect,
-    useRef,
-    useState,
+  useEffect,
+  useRef,
+  useState,
 } from 'react';
 
 import {
-    ActivityIndicator,
-    Alert,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
 import {
-    CameraView,
-    useCameraPermissions,
+  CameraView,
+  useCameraPermissions,
 } from 'expo-camera';
 
 import { File } from 'expo-file-system';
@@ -27,7 +27,7 @@ import { useRouter } from 'expo-router';
 import { parseMedicineDetails } from '../services/ocr';
 
 const BACKEND_URL =
-  'http://192.168.194.124:5000';
+  'https://medtracker-1.onrender.com';
 
 const GREEN = '#176B52';
 const LIGHT_GREEN = '#EAF5F0';

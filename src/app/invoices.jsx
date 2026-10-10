@@ -1,21 +1,21 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
 import { getData } from '../services/storage';
 
-const WEB_API = 'http://localhost:5000/api';
-const MOBILE_API = 'http://192.168.194.124:5000/api';
+const WEB_API = 'https://medtracker-1.onrender.com/api';
+const MOBILE_API = 'https://medtracker-1.onrender.com/api';
 
 const getBaseUrl = () => {
   // React Native runs on the phone, so use the laptop IP.
