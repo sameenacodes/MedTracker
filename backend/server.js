@@ -25,8 +25,22 @@ dotenv.config();
 // ROUTES
 // =====================================================
 
+
+
+// =====================================================
+// AI CHAT
+// =====================================================
+
 const aiChatRoutes =
   require('./routes/aiChat');
+
+
+// =====================================================
+// AI DECISION SUPPORT
+// =====================================================
+
+const aiDecisionSupportRoutes =
+  require('./routes/aiDecisionSupport');
 
 const stockForecastRoutes =
   require('./routes/stockForecast');
@@ -410,6 +424,18 @@ app.use(
   getRouter(
     aiChatRoutes,
     'aiChatRoutes'
+  )
+);
+
+// =====================================================
+// AI DECISION SUPPORT
+// =====================================================
+
+app.use(
+  '/api/ai-decision-support',
+  getRouter(
+    aiDecisionSupportRoutes,
+    'aiDecisionSupportRoutes'
   )
 );
 
