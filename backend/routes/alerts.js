@@ -1,13 +1,13 @@
+
 const express = require('express');
 const router = express.Router();
 
 const Alert = require('../models/Alert');
 const Medicine = require('../models/Medicine');
 const User = require('../models/User');
+
 const auth = require('../middleware/auth');
-const {
-  pharmacyStaff
-} = require('../middleware/rolePermissions');
+const { pharmacyStaff } = require('../middleware/rolePermissions');
 
 const {
   sendExpiryAlert,
@@ -19,16 +19,14 @@ const {
   sendWhatsAppLowStock,
 } = require('../services/whatsappService');
 
+const LOW_STOCK_THRESHOLD = 5;
 
 // =====================================================
-// HELPER: Calculate medicine expiry status
+// HELPERS
 // =====================================================
 
 const calculateStatus = (expiryDate) => {
-
-  if (!expiryDate) {
-    return 'safe';
-  }
+  if (!expiryDate) return 'safe';
 
   const today = new Date();
   const expiry = new Date(expiryDate);
@@ -37,39 +35,20 @@ const calculateStatus = (expiryDate) => {
   expiry.setHours(0, 0, 0, 0);
 
   const daysLeft = Math.ceil(
-    (expiry - today) /
+    (expiry.getTime() - today.getTime()) /
       (1000 * 60 * 60 * 24)
   );
 
-  if (daysLeft <= 0) {
-    return 'expired';
-  }
-
-  if (daysLeft <= 7) {
-    return 'critical';
-  }
-
-  if (daysLeft <= 30) {
-    return 'warning';
-  }
-
-  if (daysLeft <= 90) {
-    return 'caution';
-  }
+  if (daysLeft <= 0) return 'expired';
+  if (daysLeft <= 7) return 'critical';
+  if (daysLeft <= 30) return 'warning';
+  if (daysLeft <= 90) return 'caution';
 
   return 'safe';
 };
 
-
-// =====================================================
-// HELPER: Calculate days left
-// =====================================================
-
 const calculateDaysLeft = (expiryDate) => {
-
-  if (!expiryDate) {
-    return 0;
-  }
+  if (!expiryDate) return null;
 
   const today = new Date();
   const expiry = new Date(expiryDate);
@@ -78,1229 +57,482 @@ const calculateDaysLeft = (expiryDate) => {
   expiry.setHours(0, 0, 0, 0);
 
   return Math.ceil(
-    (expiry - today) /
+    (expiry.getTime() - today.getTime()) /
       (1000 * 60 * 60 * 24)
   );
 };
 
+const getAlertEmail = async () => {
+  const admin = await User.findOne({ role: 'admin' });
+  const pharmacist = await User.findOne({ role: 'pharmacist' });
+
+  return (
+    admin?.email ||
+    pharmacist?.email ||
+    process.env.PHARMACY_EMAIL ||
+    null
+  );
+};
+
+const getExpiryMedicines = (medicines) => {
+  return medicines
+    .map((medicine) => {
+      const status = calculateStatus(medicine.expiryDate);
+
+      return {
+        medicine,
+        status,
+        daysLeft: calculateDaysLeft(medicine.expiryDate),
+      };
+    })
+    .filter(({ status }) =>
+      ['expired', 'critical', 'warning', 'caution'].includes(status)
+    );
+};
+
+const getLowStockMedicines = (medicines) => {
+  return medicines.filter((medicine) => {
+    const quantity = Number(medicine.quantity || 0);
+    const status = calculateStatus(medicine.expiryDate);
+
+    return (
+      quantity <= LOW_STOCK_THRESHOLD &&
+      status !== 'expired'
+    );
+  });
+};
+
+const getExpiryEmailData = (items) =>
+  items.map(({ medicine, status, daysLeft }) => ({
+    name: medicine.name,
+    batchNumber: medicine.batchNumber || 'N/A',
+    quantity: Number(medicine.quantity || 0),
+    status,
+    daysLeft,
+  }));
+
+const getLowStockEmailData = (medicines) =>
+  medicines.map((medicine) => ({
+    name: medicine.name,
+    quantity: Number(medicine.quantity || 0),
+    supplier: medicine.supplier || 'Unknown',
+  }));
+
+const getStartOfDay = () => {
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  return date;
+};
 
 // =====================================================
-// GET CURRENT LIVE ALERTS
+// GET LIVE ALERTS
 // GET /api/alerts
-// =====================================================
-//
-// IMPORTANT:
-// This endpoint reads directly from Medicine.
-// No hardcoded alert data.
-// No stale Alert records.
-//
-// Alert types:
-// expired
-// critical
-// warning
-// caution
-// lowstock
-//
-// Removed medicines are excluded.
 // =====================================================
 
 router.get('/', auth, pharmacyStaff, async (req, res) => {
-
   try {
-
     const medicines = await Medicine.find({
-      status: {
-        $ne: 'removed',
-      },
-    }).sort({
-      expiryDate: 1,
-    });
-
+      status: { $ne: 'removed' },
+    }).sort({ expiryDate: 1 });
 
     const alerts = [];
 
-
-    // =================================================
-    // CREATE LIVE ALERTS
-    // =================================================
-
     for (const medicine of medicines) {
-
-      const status =
-        calculateStatus(
-          medicine.expiryDate
-        );
-
-      const daysLeft =
-        calculateDaysLeft(
-          medicine.expiryDate
-        );
-
-
-      // =================================================
-      // EXPIRY ALERT
-      // =================================================
+      const status = calculateStatus(medicine.expiryDate);
+      const daysLeft = calculateDaysLeft(medicine.expiryDate);
+      const quantity = Number(medicine.quantity || 0);
 
       if (
-        status === 'expired' ||
-        status === 'critical' ||
-        status === 'warning' ||
-        status === 'caution'
+        ['expired', 'critical', 'warning', 'caution'].includes(status)
       ) {
-
         alerts.push({
-
-          id:
-            `expiry-${medicine._id}`,
-
-          _id:
-            medicine._id,
-
-          medicineId:
-            medicine._id,
-
-          name:
-            medicine.name,
-
-          brand:
-            medicine.brand || 'N/A',
-
-          batch:
-            medicine.batchNumber,
-
-          expiry:
-            medicine.expiryDate,
-
-          expiryDate:
-            medicine.expiryDate,
-
-          daysLeft:
-            daysLeft,
-
-          qty:
-            Number(
-              medicine.quantity || 0
-            ),
-
-          type:
-            status,
-
-          status:
-            status,
-
-          sellingPrice:
-            Number(
-              medicine.sellingPrice || 0
-            ),
-
-          supplier:
-            medicine.supplier || '',
-
-          qrCode:
-            medicine.qrCode || null,
-
+          id: `expiry-${medicine._id}`,
+          _id: medicine._id,
+          medicineId: medicine._id,
+          name: medicine.name,
+          brand: medicine.brand || 'N/A',
+          batch: medicine.batchNumber || 'N/A',
+          expiry: medicine.expiryDate,
+          expiryDate: medicine.expiryDate,
+          daysLeft,
+          qty: quantity,
+          type: status,
+          status,
+          sellingPrice: Number(medicine.sellingPrice || 0),
+          supplier: medicine.supplier || '',
+          qrCode: medicine.qrCode || null,
         });
-
       }
 
-
-      // =================================================
-      // LOW STOCK ALERT
-      // =================================================
-      //
-      // Low stock threshold = 20 units.
-      // Expired medicines are NOT duplicated as low stock.
-      // =================================================
-
-      if (
-        Number(
-          medicine.quantity || 0
-        ) < 20 &&
-        status !== 'expired'
-      ) {
-
+      if (quantity <= LOW_STOCK_THRESHOLD && status !== 'expired') {
         alerts.push({
-
-          id:
-            `lowstock-${medicine._id}`,
-
-          _id:
-            medicine._id,
-
-          medicineId:
-            medicine._id,
-
-          name:
-            medicine.name,
-
-          brand:
-            medicine.brand || 'N/A',
-
-          batch:
-            medicine.batchNumber,
-
-          expiry:
-            medicine.expiryDate,
-
-          expiryDate:
-            medicine.expiryDate,
-
-          daysLeft:
-            daysLeft,
-
-          qty:
-            Number(
-              medicine.quantity || 0
-            ),
-
-          type:
-            'lowstock',
-
-          status:
-            status,
-
-          sellingPrice:
-            Number(
-              medicine.sellingPrice || 0
-            ),
-
-          supplier:
-            medicine.supplier || '',
-
-          qrCode:
-            medicine.qrCode || null,
-
+          id: `lowstock-${medicine._id}`,
+          _id: medicine._id,
+          medicineId: medicine._id,
+          name: medicine.name,
+          brand: medicine.brand || 'N/A',
+          batch: medicine.batchNumber || 'N/A',
+          expiry: medicine.expiryDate,
+          expiryDate: medicine.expiryDate,
+          daysLeft,
+          qty: quantity,
+          type: 'lowstock',
+          status,
+          sellingPrice: Number(medicine.sellingPrice || 0),
+          supplier: medicine.supplier || '',
+          qrCode: medicine.qrCode || null,
         });
-
       }
-
     }
 
-
-    // =================================================
-    // SORT ALERTS
-    // =================================================
-
     const priority = {
-
       expired: 1,
-
       critical: 2,
-
       warning: 3,
-
       caution: 4,
-
       lowstock: 5,
-
     };
-
 
     alerts.sort(
       (a, b) =>
-        (priority[a.type] || 99) -
-        (priority[b.type] || 99)
+        (priority[a.type] || 99) - (priority[b.type] || 99)
     );
 
-
-    // =================================================
-    // RESPONSE
-    // =================================================
-
-    res.json(alerts);
-
-
+    return res.json(alerts);
   } catch (err) {
+    console.error('Get live alerts error:', err);
 
-    console.log(
-      '❌ Get live alerts error:',
-      err
-    );
-
-    res.status(500).json({
-
-      message:
-        err.message,
-
+    return res.status(500).json({
+      success: false,
+      message: err.message,
     });
-
   }
-
 });
 
-
 // =====================================================
-// GENERATE ALERTS
+// GENERATE ALERTS AND SEND EMAIL / WHATSAPP
 // POST /api/alerts/generate
 // =====================================================
 
-router.post(
-  '/generate',
-  auth,
-  pharmacyStaff,
-  async (req, res) => {
+router.post('/generate', auth, pharmacyStaff, async (req, res) => {
+  try {
+    console.log('Generating MedTracker alerts...');
 
-    try {
+    const medicines = await Medicine.find({
+      status: { $ne: 'removed' },
+    });
 
-      console.log(
-        '🔔 Generating alerts...'
-      );
+    // Refresh expiry status in MongoDB.
+    for (const medicine of medicines) {
+      const newStatus = calculateStatus(medicine.expiryDate);
 
-
-      // =================================================
-      // GET ACTIVE MEDICINES
-      // =================================================
-
-      const medicines =
-        await Medicine.find({
-          status: {
-            $ne: 'removed',
-          },
-        });
-
-
-      const expiringMedicines = [];
-      const lowStockMedicines = [];
-
-
-      // =================================================
-      // REFRESH STATUS
-      // =================================================
-
-      for (
-        const medicine of medicines
-      ) {
-
-        const newStatus =
-          calculateStatus(
-            medicine.expiryDate
-          );
-
-        const daysLeft =
-          calculateDaysLeft(
-            medicine.expiryDate
-          );
-
-
-        // -----------------------------------------------
-        // Update status
-        // -----------------------------------------------
-
-        if (
-          medicine.status !==
-          newStatus
-        ) {
-
-          medicine.status =
-            newStatus;
-
-          await medicine.save();
-
-        }
-
-
-        // -----------------------------------------------
-        // Expiry alert
-        // -----------------------------------------------
-
-        if (
-          newStatus === 'expired' ||
-          newStatus === 'critical' ||
-          newStatus === 'warning' ||
-          newStatus === 'caution'
-        ) {
-
-          expiringMedicines.push({
-
-            medicine:
-              medicine,
-
-            daysLeft:
-              daysLeft,
-
-            status:
-              newStatus,
-
-          });
-
-        }
-
-
-        // -----------------------------------------------
-        // Low stock alert
-        // -----------------------------------------------
-
-        if (
-          Number(
-            medicine.quantity || 0
-          ) < 20 &&
-          newStatus !== 'expired'
-        ) {
-
-          lowStockMedicines.push({
-
-            medicine:
-              medicine,
-
-            quantity:
-              Number(
-                medicine.quantity || 0
-              ),
-
-          });
-
-        }
-
+      if (medicine.status !== 'removed' && medicine.status !== newStatus) {
+        medicine.status = newStatus;
+        await medicine.save();
       }
-
-
-      console.log(
-        `📊 Expiry alerts: ${expiringMedicines.length}`
-      );
-
-      console.log(
-        `📦 Low stock alerts: ${lowStockMedicines.length}`
-      );
-
-
-      // =================================================
-      // ALERT RECIPIENTS
-      // =================================================
-
-      const admin =
-        await User.findOne({
-          role: 'admin',
-        });
-
-      const pharmacist =
-        await User.findOne({
-          role: 'pharmacist',
-        });
-
-
-      const alertEmail =
-        admin?.email ||
-        pharmacist?.email ||
-        process.env.PHARMACY_EMAIL;
-
-
-      const alertWhatsApp =
-        process.env.PHARMACY_WHATSAPP;
-
-
-      // =================================================
-      // EXPIRY MEDICINE DATA
-      // =================================================
-
-      const medicinesWithDays =
-        expiringMedicines.map(
-          (item) => ({
-
-            name:
-              item.medicine.name,
-
-            batchNumber:
-              item.medicine.batchNumber,
-
-            quantity:
-              item.medicine.quantity,
-
-            status:
-              item.status,
-
-            daysLeft:
-              item.daysLeft,
-
-          })
-        );
-
-
-      // =================================================
-      // EMAIL RESULT
-      // =================================================
-
-      let emailResult = {
-
-        success: false,
-
-        message:
-          'Email not configured',
-
-      };
-
-
-      // =================================================
-      // SEND EXPIRY EMAIL
-      // =================================================
-
-      if (
-        expiringMedicines.length > 0 &&
-        alertEmail
-      ) {
-
-        try {
-
-          emailResult =
-            await sendExpiryAlert(
-              alertEmail,
-              medicinesWithDays
-            );
-
-          console.log(
-            emailResult.success
-              ? '✅ Expiry email sent'
-              : '❌ Expiry email failed'
-          );
-
-        } catch (emailError) {
-
-          console.log(
-            '❌ Email error:',
-            emailError.message
-          );
-
-          emailResult = {
-
-            success: false,
-
-            message:
-              emailError.message,
-
-          };
-
-        }
-
-      }
-
-
-      // =================================================
-      // WHATSAPP RESULT
-      // =================================================
-
-      let whatsappResult = {
-
-        success: false,
-
-        message:
-          'WhatsApp not configured',
-
-      };
-
-
-      // =================================================
-      // SEND EXPIRY WHATSAPP
-      // =================================================
-
-      if (
-        expiringMedicines.length > 0 &&
-        alertWhatsApp
-      ) {
-
-        try {
-
-          whatsappResult =
-            await sendWhatsAppAlert(
-              alertWhatsApp,
-              medicinesWithDays
-            );
-
-          console.log(
-            whatsappResult.success
-              ? '✅ Expiry WhatsApp sent'
-              : '❌ Expiry WhatsApp failed'
-          );
-
-        } catch (
-          whatsappError
-        ) {
-
-          console.log(
-            '❌ WhatsApp error:',
-            whatsappError.message
-          );
-
-          whatsappResult = {
-
-            success: false,
-
-            message:
-              whatsappError.message,
-
-          };
-
-        }
-
-      }
-
-
-      // =================================================
-      // LOW STOCK EMAIL
-      // =================================================
-
-      let lowStockEmailResult = {
-
-        success: false,
-
-      };
-
-
-      if (
-        lowStockMedicines.length > 0 &&
-        alertEmail
-      ) {
-
-        try {
-
-          lowStockEmailResult =
-            await sendLowStockAlert(
-              alertEmail,
-
-              lowStockMedicines.map(
-                (item) => ({
-
-                  name:
-                    item.medicine.name,
-
-                  quantity:
-                    item.medicine.quantity,
-
-                  supplier:
-                    item.medicine.supplier,
-
-                })
-              )
-            );
-
-          console.log(
-            lowStockEmailResult.success
-              ? '✅ Low stock email sent'
-              : '❌ Low stock email failed'
-          );
-
-        } catch (emailError) {
-
-          console.log(
-            '❌ Low stock email error:',
-            emailError.message
-          );
-
-        }
-
-      }
-
-
-      // =================================================
-      // LOW STOCK WHATSAPP
-      // =================================================
-
-      let lowStockWhatsappResult = {
-
-        success: false,
-
-      };
-
-
-      if (
-        lowStockMedicines.length > 0 &&
-        alertWhatsApp
-      ) {
-
-        try {
-
-          lowStockWhatsappResult =
-            await sendWhatsAppLowStock(
-              alertWhatsApp,
-
-              lowStockMedicines.map(
-                (item) => ({
-
-                  name:
-                    item.medicine.name,
-
-                  quantity:
-                    item.medicine.quantity,
-
-                  supplier:
-                    item.medicine.supplier,
-
-                })
-              )
-            );
-
-          console.log(
-            lowStockWhatsappResult.success
-              ? '✅ Low stock WhatsApp sent'
-              : '❌ Low stock WhatsApp failed'
-          );
-
-        } catch (
-          whatsappError
-        ) {
-
-          console.log(
-            '❌ Low stock WhatsApp error:',
-            whatsappError.message
-          );
-
-        }
-
-      }
-
-
-      // =================================================
-      // SAVE EXPIRY ALERT RECORDS
-      // =================================================
-
-      const alertsCreated = [];
-
-
-      for (
-        const item of expiringMedicines
-      ) {
-
-        const medicine =
-          item.medicine;
-
-        const daysLeft =
-          item.daysLeft;
-
-        const alertType =
-          item.status;
-
-
-        // -----------------------------------------------
-        // START OF TODAY
-        // -----------------------------------------------
-
-        const startOfDay =
-          new Date();
-
-        startOfDay.setHours(
-          0,
-          0,
-          0,
-          0
-        );
-
-
-        // -----------------------------------------------
-        // CHECK DUPLICATE
-        // -----------------------------------------------
-
-        const existingAlert =
-          await Alert.findOne({
-
-            medicine:
-              medicine._id,
-
-            alertType:
-              alertType,
-
-            createdAt: {
-
-              $gte:
-                startOfDay,
-
-            },
-
-          });
-
-
-        if (
-          existingAlert
-        ) {
-
-          console.log(
-            `ℹ️ Alert already exists for ${medicine.name}`
-          );
-
-          continue;
-
-        }
-
-
-        // -----------------------------------------------
-        // CREATE ALERT
-        // -----------------------------------------------
-
-        const alert =
-          new Alert({
-
-            medicine:
-              medicine._id,
-
-            medicineName:
-              medicine.name,
-
-            alertType:
-              alertType,
-
-            daysLeft:
-              daysLeft,
-
-            sentEmail:
-              emailResult.success,
-
-            sentWhatsapp:
-              whatsappResult.success,
-
-          });
-
-
-        await alert.save();
-
-        alertsCreated.push(
-          alert
-        );
-
-      }
-
-
-      // =================================================
-      // SAVE LOW STOCK ALERT RECORDS
-      // =================================================
-
-      for (
-        const item of lowStockMedicines
-      ) {
-
-        const medicine =
-          item.medicine;
-
-
-        const startOfDay =
-          new Date();
-
-        startOfDay.setHours(
-          0,
-          0,
-          0,
-          0
-        );
-
-
-        const existingAlert =
-          await Alert.findOne({
-
-            medicine:
-              medicine._id,
-
-            alertType:
-              'lowstock',
-
-            createdAt: {
-
-              $gte:
-                startOfDay,
-
-            },
-
-          });
-
-
-        if (
-          existingAlert
-        ) {
-
-          continue;
-
-        }
-
-
-        const alert =
-          new Alert({
-
-            medicine:
-              medicine._id,
-
-            medicineName:
-              medicine.name,
-
-            alertType:
-              'lowstock',
-
-            daysLeft:
-              0,
-
-            sentEmail:
-              lowStockEmailResult.success,
-
-            sentWhatsapp:
-              lowStockWhatsappResult.success,
-
-          });
-
-
-        await alert.save();
-
-        alertsCreated.push(
-          alert
-        );
-
-      }
-
-
-      // =================================================
-      // RESPONSE
-      // =================================================
-
-      res.json({
-
-        message:
-          `✅ ${alertsCreated.length} alerts generated!`,
-
-        alerts:
-          alertsCreated,
-
-        emailSent:
-          emailResult.success,
-
-        whatsappSent:
-          whatsappResult.success,
-
-        lowStockEmailSent:
-          lowStockEmailResult.success,
-
-        lowStockWhatsappSent:
-          lowStockWhatsappResult.success,
-
-        expiringCount:
-          expiringMedicines.length,
-
-        lowStockCount:
-          lowStockMedicines.length,
-
-      });
-
-
-    } catch (err) {
-
-      console.log(
-        '❌ Alert generation error:',
-        err
-      );
-
-      res.status(500).json({
-
-        message:
-          err.message,
-
-      });
-
     }
 
-  }
-);
+    const expiryItems = getExpiryMedicines(medicines);
+    const lowStockMedicines = getLowStockMedicines(medicines);
 
+    console.log(`Expiry alerts: ${expiryItems.length}`);
+    console.log(`Low-stock alerts: ${lowStockMedicines.length}`);
+
+    const alertEmail = await getAlertEmail();
+    const alertWhatsApp = process.env.PHARMACY_WHATSAPP;
+
+    let expiryEmailResult = {
+      success: false,
+      message: alertEmail ? 'No expiry alerts to send' : 'Recipient email not configured',
+    };
+
+    let lowStockEmailResult = {
+      success: false,
+      message: alertEmail ? 'No low-stock alerts to send' : 'Recipient email not configured',
+    };
+
+    let expiryWhatsappResult = {
+      success: false,
+      message: 'No expiry WhatsApp sent',
+    };
+
+    let lowStockWhatsappResult = {
+      success: false,
+      message: 'No low-stock WhatsApp sent',
+    };
+
+    // Send expiry email.
+    if (expiryItems.length > 0 && alertEmail) {
+      expiryEmailResult = await sendExpiryAlert(
+        alertEmail,
+        getExpiryEmailData(expiryItems)
+      );
+
+      console.log(
+        expiryEmailResult.success
+          ? 'Expiry email sent'
+          : `Expiry email failed: ${expiryEmailResult.error || 'Unknown error'}`
+      );
+    }
+
+    // Send low-stock email.
+    if (lowStockMedicines.length > 0 && alertEmail) {
+      lowStockEmailResult = await sendLowStockAlert(
+        alertEmail,
+        getLowStockEmailData(lowStockMedicines)
+      );
+
+      console.log(
+        lowStockEmailResult.success
+          ? 'Low-stock email sent'
+          : `Low-stock email failed: ${lowStockEmailResult.error || 'Unknown error'}`
+      );
+    }
+
+    // Send expiry WhatsApp.
+    if (expiryItems.length > 0 && alertWhatsApp) {
+      expiryWhatsappResult = await sendWhatsAppAlert(
+        alertWhatsApp,
+        getExpiryEmailData(expiryItems)
+      );
+
+      console.log(
+        expiryWhatsappResult.success
+          ? 'Expiry WhatsApp sent'
+          : 'Expiry WhatsApp failed'
+      );
+    }
+
+    // Send low-stock WhatsApp.
+    if (lowStockMedicines.length > 0 && alertWhatsApp) {
+      lowStockWhatsappResult = await sendWhatsAppLowStock(
+        alertWhatsApp,
+        getLowStockEmailData(lowStockMedicines)
+      );
+
+      console.log(
+        lowStockWhatsappResult.success
+          ? 'Low-stock WhatsApp sent'
+          : 'Low-stock WhatsApp failed'
+      );
+    }
+
+    // Save one database alert per medicine/type per day.
+    // This prevents duplicate notification records, but does not
+    // itself prevent repeated emails when this endpoint is called again.
+    const startOfDay = getStartOfDay();
+    const alertsCreated = [];
+
+    for (const item of expiryItems) {
+      const medicine = item.medicine;
+
+      const existingAlert = await Alert.findOne({
+        medicine: medicine._id,
+        alertType: item.status,
+        createdAt: { $gte: startOfDay },
+      });
+
+      if (existingAlert) continue;
+
+      const alert = await Alert.create({
+        medicine: medicine._id,
+        medicineName: medicine.name,
+        alertType: item.status,
+        daysLeft: item.daysLeft,
+        sentEmail: expiryEmailResult.success,
+        sentWhatsapp: expiryWhatsappResult.success,
+      });
+
+      alertsCreated.push(alert);
+    }
+
+    for (const medicine of lowStockMedicines) {
+      const existingAlert = await Alert.findOne({
+        medicine: medicine._id,
+        alertType: 'lowstock',
+        createdAt: { $gte: startOfDay },
+      });
+
+      if (existingAlert) continue;
+
+      const alert = await Alert.create({
+        medicine: medicine._id,
+        medicineName: medicine.name,
+        alertType: 'lowstock',
+        daysLeft: 0,
+        sentEmail: lowStockEmailResult.success,
+        sentWhatsapp: lowStockWhatsappResult.success,
+      });
+
+      alertsCreated.push(alert);
+    }
+
+    return res.json({
+      success: true,
+      message: `${alertsCreated.length} new alert records created`,
+      alerts: alertsCreated,
+      recipientEmail: alertEmail,
+      emailSent: expiryEmailResult.success,
+      lowStockEmailSent: lowStockEmailResult.success,
+      whatsappSent: expiryWhatsappResult.success,
+      lowStockWhatsappSent: lowStockWhatsappResult.success,
+      expiringCount: expiryItems.length,
+      lowStockCount: lowStockMedicines.length,
+      emailResults: {
+        expiry: expiryEmailResult,
+        lowStock: lowStockEmailResult,
+      },
+    });
+  } catch (err) {
+    console.error('Alert generation error:', err);
+
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
+});
 
 // =====================================================
-// NOTIFICATION CENTER
 // GET UNREAD ALERT COUNT
 // GET /api/alerts/unread-count
 // =====================================================
 
-router.get(
-  '/unread-count',
-  auth,
-  pharmacyStaff,
-  async (req, res) => {
+router.get('/unread-count', auth, pharmacyStaff, async (req, res) => {
+  try {
+    const count = await Alert.countDocuments({ isRead: false });
 
-    try {
+    return res.json({
+      success: true,
+      count,
+    });
+  } catch (err) {
+    console.error('Unread alert count error:', err);
 
-      const count =
-        await Alert.countDocuments({
-          isRead: false,
-        });
-
-
-      res.json({
-
-        success: true,
-
-        count,
-
-      });
-
-
-    } catch (err) {
-
-      console.log(
-        '❌ Unread alert count error:',
-        err
-      );
-
-      res.status(500).json({
-
-        success: false,
-
-        message:
-          err.message,
-
-      });
-
-    }
-
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
   }
-);
-
+});
 
 // =====================================================
-// NOTIFICATION CENTER
 // MARK ALL ALERTS AS READ
 // PUT /api/alerts/read-all
 // =====================================================
 
-router.put(
-  '/read-all',
-  auth,
-  pharmacyStaff,
-  async (req, res) => {
+router.put('/read-all', auth, pharmacyStaff, async (req, res) => {
+  try {
+    const result = await Alert.updateMany(
+      { isRead: false },
+      {
+        $set: {
+          isRead: true,
+          readAt: new Date(),
+        },
+      }
+    );
 
-    try {
+    return res.json({
+      success: true,
+      message: 'All alerts marked as read',
+      modifiedCount: result.modifiedCount,
+    });
+  } catch (err) {
+    console.error('Mark all alerts read error:', err);
 
-      const result =
-        await Alert.updateMany(
-
-          {
-            isRead: false,
-          },
-
-          {
-            $set: {
-
-              isRead: true,
-
-              readAt:
-                new Date(),
-
-            },
-          }
-
-        );
-
-
-      res.json({
-
-        success: true,
-
-        message:
-          'All alerts marked as read',
-
-        modifiedCount:
-          result.modifiedCount,
-
-      });
-
-
-    } catch (err) {
-
-      console.log(
-        '❌ Mark all alerts read error:',
-        err
-      );
-
-      res.status(500).json({
-
-        success: false,
-
-        message:
-          err.message,
-
-      });
-
-    }
-
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
   }
-);
-
+});
 
 // =====================================================
-// NOTIFICATION CENTER
-// MARK SINGLE ALERT AS READ
+// MARK ONE ALERT AS READ
 // PUT /api/alerts/:id/read
 // =====================================================
 
-router.put(
-  '/:id/read',
-  auth,
-  pharmacyStaff,
-  async (req, res) => {
+router.put('/:id/read', auth, pharmacyStaff, async (req, res) => {
+  try {
+    const alert = await Alert.findById(req.params.id);
 
-    try {
-
-      const alert =
-        await Alert.findById(
-          req.params.id
-        );
-
-
-      if (!alert) {
-
-        return res.status(404).json({
-
-          success: false,
-
-          message:
-            'Alert not found',
-
-        });
-
-      }
-
-
-      alert.isRead = true;
-
-      alert.readAt =
-        new Date();
-
-
-      await alert.save();
-
-
-      res.json({
-
-        success: true,
-
-        message:
-          'Alert marked as read',
-
-        alert,
-
-      });
-
-
-    } catch (err) {
-
-      console.log(
-        '❌ Mark alert read error:',
-        err
-      );
-
-      res.status(500).json({
-
+    if (!alert) {
+      return res.status(404).json({
         success: false,
-
-        message:
-          err.message,
-
+        message: 'Alert not found',
       });
-
     }
 
-  }
-);
+    alert.isRead = true;
+    alert.readAt = new Date();
 
+    await alert.save();
+
+    return res.json({
+      success: true,
+      message: 'Alert marked as read',
+      alert,
+    });
+  } catch (err) {
+    console.error('Mark alert read error:', err);
+
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
+});
 
 // =====================================================
 // MANUAL EMAIL ALERT
 // POST /api/alerts/send-email
 // =====================================================
 
-router.post(
-  '/send-email',
-  auth,
-  pharmacyStaff,
-  async (req, res) => {
+router.post('/send-email', auth, pharmacyStaff, async (req, res) => {
+  try {
+    // Recipient is selected by the backend.
+    // The frontend no longer needs to provide "email".
+    const toEmail = await getAlertEmail();
 
-    try {
-
-      const {
-        email,
-        medicines,
-      } = req.body;
-
-
-      // -----------------------------------------------
-      // Validate email
-      // -----------------------------------------------
-
-      if (!email) {
-
-        return res.status(400).json({
-
-          message:
-            'Email address is required',
-
-          success:
-            false,
-
-        });
-
-      }
-
-
-      // -----------------------------------------------
-      // Validate medicines
-      // -----------------------------------------------
-
-      if (
-        !medicines ||
-        !Array.isArray(medicines) ||
-        medicines.length === 0
-      ) {
-
-        return res.status(400).json({
-
-          message:
-            'Medicine list is required',
-
-          success:
-            false,
-
-        });
-
-      }
-
-
-      // -----------------------------------------------
-      // Send email
-      // -----------------------------------------------
-
-      const result =
-        await sendExpiryAlert(
-          email,
-          medicines
-        );
-
-
-      res.json({
-
+    if (!toEmail) {
+      return res.status(400).json({
+        success: false,
         message:
-          result.success
-            ? '✅ Email sent!'
-            : '❌ Email failed!',
-
-        success:
-          result.success,
-
+          'No recipient email configured. Set an admin/pharmacist email or PHARMACY_EMAIL.',
       });
-
-
-    } catch (err) {
-
-      console.log(
-        '❌ Manual email error:',
-        err
-      );
-
-      res.status(500).json({
-
-        message:
-          err.message,
-
-        success:
-          false,
-
-      });
-
     }
 
+    const medicines = req.body.medicines;
+
+    if (!Array.isArray(medicines) || medicines.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Medicine list is required',
+      });
+    }
+
+    const result = await sendExpiryAlert(toEmail, medicines);
+
+    if (!result.success) {
+      return res.status(500).json({
+        success: false,
+        message: result.error || 'Email sending failed',
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: `Email sent successfully to ${toEmail}`,
+    });
+  } catch (err) {
+    console.error('Manual email error:', err);
+
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to send email',
+    });
   }
-);
-
-
-// =====================================================
-// EXPORT ROUTER
-// =====================================================
+});
 
 module.exports = router;

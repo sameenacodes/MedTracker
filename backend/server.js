@@ -554,365 +554,219 @@ mongoose
     }
   );
 
-// =====================================================
-// DAILY EXPIRY + LOW STOCK CRON
-// 9:00 AM EVERY DAY
-// =====================================================
 
-cron.schedule(
-  '0 9 * * *',
-  async () => {
+/* =====================================================
+   AUTOMATIC EXPIRY + LOW STOCK EMAIL ALERTS
+   Runs daily at 9:00 AM
+===================================================== */
 
-    console.log(
-      '⏰ Running daily expiry check...'
-    );
+const runAutomaticMedicineAlerts = async () => {
+  const Medicine = require('./models/Medicine');
+  const User = require('./models/User');
+  const Alert = require('./models/Alert');
 
-    try {
+  const {
+    sendExpiryAlert,
+    sendLowStockAlert,
+  } = require('./services/emailService');
 
-      const Medicine =
-        require(
-          './models/Medicine'
+  const LOW_STOCK_THRESHOLD = 5;
+
+  try {
+    console.log('Checking medicine expiry and low stock...');
+
+    const medicines = await Medicine.find({
+      status: { $ne: 'removed' },
+    });
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const expiryMedicines = [];
+    const lowStockMedicines = [];
+
+    for (const medicine of medicines) {
+      let daysLeft = null;
+
+      if (medicine.expiryDate) {
+        const expiry = new Date(medicine.expiryDate);
+        expiry.setHours(0, 0, 0, 0);
+
+        daysLeft = Math.ceil(
+          (expiry.getTime() - today.getTime()) /
+            (1000 * 60 * 60 * 24)
         );
-
-      const User =
-        require(
-          './models/User'
-        );
-
-      const {
-        sendExpiryAlert,
-        sendLowStockAlert
-      } =
-        require(
-          './services/emailService'
-        );
-
-      // =================================================
-      // TODAY
-      // =================================================
-
-      const today =
-        new Date();
-
-      // =================================================
-      // GET ACTIVE MEDICINES
-      // =================================================
-
-      const medicines =
-        await Medicine.find({
-
-          status: {
-            $ne: 'removed'
-          }
-
-        });
-
-      const alertMedicines = [];
-
-      const lowStockMedicines = [];
-
-      // =================================================
-      // PROCESS MEDICINES
-      // =================================================
-
-      for (
-        const med of medicines
-      ) {
-
-        const expiry =
-          new Date(
-            med.expiryDate
-          );
-
-        const daysLeft =
-          Math.ceil(
-
-            (
-              expiry - today
-            ) /
-
-            (
-              1000 *
-              60 *
-              60 *
-              24
-            )
-
-          );
-
-        // =================================================
-        // CALCULATE STATUS
-        // =================================================
-
-        let newStatus =
-          'safe';
-
-        if (
-          daysLeft <= 0
-        ) {
-
-          newStatus =
-            'expired';
-
-        }
-
-        else if (
-          daysLeft <= 7
-        ) {
-
-          newStatus =
-            'critical';
-
-        }
-
-        else if (
-          daysLeft <= 30
-        ) {
-
-          newStatus =
-            'warning';
-
-        }
-
-        else if (
-          daysLeft <= 90
-        ) {
-
-          newStatus =
-            'caution';
-
-        }
-
-        else {
-
-          newStatus =
-            'safe';
-
-        }
-
-        // =================================================
-        // UPDATE MEDICINE STATUS
-        // =================================================
-
-        await Medicine.findByIdAndUpdate(
-
-          med._id,
-
-          {
-            status:
-              newStatus
-          }
-
-        );
-
-        // =================================================
-        // EXPIRY ALERT LIST
-        // =================================================
-
-        if (
-          newStatus !== 'safe'
-        ) {
-
-          alertMedicines.push({
-
-            name:
-              med.name,
-
-            batchNumber:
-              med.batchNumber,
-
-            quantity:
-              med.quantity,
-
-            status:
-              newStatus,
-
-            daysLeft:
-              daysLeft
-
-          });
-
-        }
-
-        // =================================================
-        // LOW STOCK
-        // =================================================
-
-        if (
-
-          med.quantity < 20
-
-          &&
-
-          newStatus !== 'expired'
-
-        ) {
-
-          lowStockMedicines.push({
-
-            name:
-              med.name,
-
-            quantity:
-              med.quantity,
-
-            supplier:
-              med.supplier
-
-          });
-
-        }
-
       }
 
-      // =================================================
-      // FIND EMAIL RECIPIENT
-      // =================================================
+      let newStatus = 'safe';
 
-      const admin =
-        await User.findOne({
-          role: 'admin'
+      if (daysLeft !== null) {
+        if (daysLeft <= 0) newStatus = 'expired';
+        else if (daysLeft <= 7) newStatus = 'critical';
+        else if (daysLeft <= 30) newStatus = 'warning';
+        else if (daysLeft <= 90) newStatus = 'caution';
+      }
+
+      // Keep the database expiry status current.
+      if (medicine.status !== newStatus) {
+        medicine.status = newStatus;
+        await medicine.save();
+      }
+
+      const expiryStage =
+        daysLeft !== null && daysLeft <= 0
+          ? 'expired'
+          : daysLeft === 1
+          ? 'one_day'
+          : daysLeft !== null && daysLeft <= 7
+          ? 'critical'
+          : daysLeft !== null && daysLeft <= 30
+          ? 'warning'
+          : daysLeft !== null && daysLeft <= 90
+          ? 'caution'
+          : null;
+
+      if (expiryStage) {
+        expiryMedicines.push({
+          medicine,
+          daysLeft,
+          expiryStage,
         });
-
-      const pharmacist =
-        await User.findOne({
-          role: 'pharmacist'
-        });
-
-      const alertEmail =
-
-        admin?.email ||
-
-        pharmacist?.email ||
-
-        process.env.PHARMACY_EMAIL;
-
-      // =================================================
-      // EXPIRY EMAIL
-      // =================================================
+      }
 
       if (
-
-        alertMedicines.length > 0
-
-        &&
-
-        alertEmail
-
+        Number(medicine.quantity || 0) <= LOW_STOCK_THRESHOLD &&
+        newStatus !== 'expired'
       ) {
-
-        const result =
-          await sendExpiryAlert(
-
-            alertEmail,
-
-            alertMedicines
-
-          );
-
-        if (
-          result.success
-        ) {
-
-          console.log(
-
-            `✅ Expiry alert email sent to ${alertEmail}`
-
-          );
-
-          console.log(
-
-            `📧 ${alertMedicines.length} medicines reported`
-
-          );
-
-        }
-
+        lowStockMedicines.push(medicine);
       }
-
-      // =================================================
-      // LOW STOCK EMAIL
-      // =================================================
-
-      if (
-
-        lowStockMedicines.length > 0
-
-        &&
-
-        alertEmail
-
-      ) {
-
-        const result =
-          await sendLowStockAlert(
-
-            alertEmail,
-
-            lowStockMedicines
-
-          );
-
-        if (
-          result.success
-        ) {
-
-          console.log(
-
-            `✅ Low stock alert email sent to ${alertEmail}`
-
-          );
-
-        }
-
-      }
-
-      // =================================================
-      // COMPLETE
-      // =================================================
-
-      console.log(
-        '✅ Daily expiry check complete!'
-      );
-
-      console.log(
-
-        `📊 Expiring: ${alertMedicines.length}` +
-
-        ` | Low Stock: ${lowStockMedicines.length}`
-
-      );
-
     }
 
-    catch (err) {
+    const admin = await User.findOne({ role: 'admin' });
+    const pharmacist = await User.findOne({ role: 'pharmacist' });
 
-      console.log(
-        '❌ Cron job error:',
-        err.message
+    const recipient =
+      admin?.email ||
+      pharmacist?.email ||
+      process.env.PHARMACY_EMAIL;
+
+    if (!recipient) {
+      console.error(
+        'Automatic alerts skipped: no recipient email configured.'
       );
-
+      return;
     }
 
-  }
-);
+    // Send expiry emails only for stages not already emailed.
+    const newExpiryAlerts = [];
 
-// =====================================================
-// TEST CRON
-// Runs every minute
-// Currently disabled
-// =====================================================
+    for (const item of expiryMedicines) {
+      const { medicine, expiryStage, daysLeft } = item;
 
-/*
-cron.schedule(
-  '* * * * *',
-  async () => {
+      const previousAlert = await Alert.findOne({
+        medicine: medicine._id,
+        alertType: expiryStage,
+        sentEmail: true,
+      });
+
+      if (!previousAlert) {
+        newExpiryAlerts.push(item);
+      }
+    }
+
+    if (newExpiryAlerts.length > 0) {
+      const result = await sendExpiryAlert(
+        recipient,
+        newExpiryAlerts.map(({ medicine, daysLeft, expiryStage }) => ({
+          name: medicine.name,
+          batchNumber: medicine.batchNumber || 'N/A',
+          quantity: medicine.quantity || 0,
+          status:
+            expiryStage === 'one_day' ? 'critical' : expiryStage,
+          daysLeft,
+        }))
+      );
+
+      if (result.success) {
+        for (const item of newExpiryAlerts) {
+          await Alert.create({
+            medicine: item.medicine._id,
+            medicineName: item.medicine.name,
+            alertType: item.expiryStage,
+            daysLeft: item.daysLeft,
+            sentEmail: true,
+            sentWhatsapp: false,
+          });
+        }
+
+        console.log(
+          `Expiry email sent to ${recipient} for ${newExpiryAlerts.length} medicine(s).`
+        );
+      } else {
+        console.error('Expiry email failed:', result.error);
+      }
+    }
+
+    // Send low-stock emails only for medicines not already emailed.
+    const newLowStockAlerts = [];
+
+    for (const medicine of lowStockMedicines) {
+      const previousAlert = await Alert.findOne({
+        medicine: medicine._id,
+        alertType: 'lowstock',
+        sentEmail: true,
+      });
+
+      if (!previousAlert) {
+        newLowStockAlerts.push(medicine);
+      }
+    }
+
+    if (newLowStockAlerts.length > 0) {
+      const result = await sendLowStockAlert(
+        recipient,
+        newLowStockAlerts.map((medicine) => ({
+          name: medicine.name,
+          quantity: medicine.quantity || 0,
+          supplier: medicine.supplier || 'Unknown',
+        }))
+      );
+
+      if (result.success) {
+        for (const medicine of newLowStockAlerts) {
+          await Alert.create({
+            medicine: medicine._id,
+            medicineName: medicine.name,
+            alertType: 'lowstock',
+            daysLeft: 0,
+            sentEmail: true,
+            sentWhatsapp: false,
+          });
+        }
+
+        console.log(
+          `Low-stock email sent to ${recipient} for ${newLowStockAlerts.length} medicine(s).`
+        );
+      } else {
+        console.error('Low-stock email failed:', result.error);
+      }
+    }
 
     console.log(
-      '⏰ Test cron running...',
-      new Date().toLocaleTimeString()
+      `Automatic check complete. Expiry stages: ${newExpiryAlerts.length}; low stock: ${newLowStockAlerts.length}.`
     );
-
+  } catch (error) {
+    console.error('Automatic medicine alert error:', error);
   }
-);
-*/
+};
+
+// Every day at 9:00 AM (server timezone).
+cron.schedule('0 9 * * *', runAutomaticMedicineAlerts);
+
+// Run once after MongoDB connects, so you can test without waiting
+// until 9 AM. Remove this call if you don't want a startup check.
+mongoose.connection.once('open', () => {
+  runAutomaticMedicineAlerts().catch((error) =>
+    console.error('Startup medicine alert error:', error)
+  );
+});

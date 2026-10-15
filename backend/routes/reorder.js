@@ -3,9 +3,7 @@ const express = require('express');
 const router = express.Router();
 
 const Medicine = require('../models/Medicine');
-
 const Sale = require('../models/Sale');
-
 const Reorder = require('../models/Reorder');
 
 const auth = require('../middleware/auth');
@@ -14,6 +12,18 @@ const {
   pharmacyStaff
 } = require('../middleware/rolePermissions');
 
+
+// ═════════════════════════════════════════════
+// REORDER SETTINGS
+// ═════════════════════════════════════════════
+
+// If physical stock is 5 or below,
+// medicine becomes eligible for reorder.
+const LOW_STOCK_THRESHOLD = 5;
+
+// Minimum target stock when there is little/no sales history.
+// This solves the problem where new medicines have 0 sales.
+const MIN_TARGET_STOCK = 10;
 
 
 // ═════════════════════════════════════════════
@@ -24,57 +34,56 @@ async function calculateReorder(medicine) {
   const today = new Date();
 
   const ninetyDaysAgo = new Date();
-
   ninetyDaysAgo.setDate(today.getDate() - 90);
 
 
+  // ═════════════════════════════════════════════
+  // 1. GET LAST 90 DAYS SALES
+  // ═════════════════════════════════════════════
 
-  // Get sales from the last 90 days.
   const sales = await Sale.find({
     createdAt: {
-      $gte: ninetyDaysAgo,
-    },
+      $gte: ninetyDaysAgo
+    }
   });
-
 
 
   let soldLast90Days = 0;
 
 
-
   for (const sale of sales) {
     if (!sale.items) continue;
 
-
-
     for (const item of sale.items) {
+
       if (
         item.medicine &&
         item.medicine.toString() === medicine._id.toString()
       ) {
         soldLast90Days += Number(item.quantity) || 0;
       }
+
     }
   }
 
 
+  // ═════════════════════════════════════════════
+  // 2. DEMAND CALCULATION
+  // ═════════════════════════════════════════════
 
-  // AI calculations.
-  const dailyAverage = soldLast90Days / 90;
+  const dailyAverage =
+    soldLast90Days / 90;
 
-  const monthlyNeed = dailyAverage * 30;
+  const monthlyNeed =
+    dailyAverage * 30;
 
-  const currentStock = Number(medicine.quantity) || 0;
 
+  const currentStock =
+    Number(medicine.quantity) || 0;
 
 
   // ═════════════════════════════════════════════
-  // IMPORTANT
-  // Count already placed orders as incoming stock.
-  //
-  // This prevents a medicine from appearing again
-  // in AI Reorder when an order is already pending,
-  // ordered, or partially received.
+  // 3. CHECK EXISTING / INCOMING ORDERS
   // ═════════════════════════════════════════════
 
   const activeOrders = await Reorder.find({
@@ -85,16 +94,15 @@ async function calculateReorder(medicine) {
         'pending',
         'ordered',
         'partially_received'
-      ],
-    },
+      ]
+    }
 
   }).select(
     'quantity receivedQuantity status'
   );
 
 
-
-  // Calculate only the quantity that has
+  // Calculate only stock which has
   // NOT yet been received.
 
   const outstandingOrderQuantity =
@@ -120,71 +128,153 @@ async function calculateReorder(medicine) {
     );
 
 
+  // ═════════════════════════════════════════════
+  // 4. EFFECTIVE STOCK
+  // ═════════════════════════════════════════════
 
-  // ═════════════════════════════════════════════
-  // CURRENT STOCK + INCOMING STOCK
-  // ═════════════════════════════════════════════
+  // Physical stock + stock already coming.
 
   const effectiveStock =
     currentStock +
     outstandingOrderQuantity;
 
 
+  // ═════════════════════════════════════════════
+  // 5. STOCK COVERAGE
+  // ═════════════════════════════════════════════
 
   let stockLasts = 999;
 
-
-
   if (dailyAverage > 0) {
+
     stockLasts =
       effectiveStock /
       dailyAverage;
+
   }
 
 
+  // ═════════════════════════════════════════════
+  // 6. TARGET STOCK
+  // ═════════════════════════════════════════════
+
+  // Normally use monthly demand.
+  //
+  // But if there is no sales history,
+  // maintain at least 10 units.
+
+  const targetStock =
+    Math.max(
+      Math.ceil(monthlyNeed),
+      MIN_TARGET_STOCK
+    );
+
 
   // ═════════════════════════════════════════════
-  // REORDER QUANTITY
+  // 7. BASIC REORDER QUANTITY
   // ═════════════════════════════════════════════
 
-  const reorderQuantity =
+  let reorderQuantity =
     Math.max(
       0,
       Math.ceil(
-        monthlyNeed -
+        targetStock -
         effectiveStock
       )
     );
 
 
+  // ═════════════════════════════════════════════
+  // 8. LOW STOCK FALLBACK
+  // ═════════════════════════════════════════════
+
+  // Important:
+  //
+  // If there is no sales history,
+  // monthlyNeed becomes 0.
+  //
+  // Previously:
+  //
+  // monthlyNeed - stock = 0
+  //
+  // So medicines like:
+  //
+  // Montelukast = 4
+  // Pantoprazole = 3
+  //
+  // were not reordered.
+  //
+  // Now low stock itself can trigger reorder.
+  //
+  // But we do NOT create another suggestion
+  // when enough stock is already incoming.
+
+  if (
+    currentStock <= LOW_STOCK_THRESHOLD &&
+    outstandingOrderQuantity === 0
+  ) {
+
+    reorderQuantity =
+      Math.max(
+        reorderQuantity,
+        Math.max(
+          0,
+          MIN_TARGET_STOCK -
+          currentStock
+        )
+      );
+
+  }
+
 
   // ═════════════════════════════════════════════
-  // PRIORITY
+  // 9. PRIORITY
   // ═════════════════════════════════════════════
 
   let priority = 'LOW';
 
 
+  // Critical low physical stock
+  if (
+    currentStock <= 2 ||
+    stockLasts <= 7
+  ) {
 
-  if (stockLasts <= 7) {
     priority = 'HIGH';
 
-  } else if (stockLasts <= 30) {
+  }
+
+  // Low stock / stock running out soon
+  else if (
+    currentStock <= LOW_STOCK_THRESHOLD ||
+    stockLasts <= 30
+  ) {
+
     priority = 'MEDIUM';
+
   }
 
 
+  // ═════════════════════════════════════════════
+  // 10. RETURN RESULT
+  // ═════════════════════════════════════════════
 
   return {
-    medicineId: medicine._id,
 
-    name: medicine.name,
+    medicineId:
+      medicine._id,
 
-    brand: medicine.brand,
+    name:
+      medicine.name,
 
-    category: medicine.category,
+    brand:
+      medicine.brand,
 
-    batchNumber: medicine.batchNumber,
+    category:
+      medicine.category,
+
+    batchNumber:
+      medicine.batchNumber,
 
     currentStock,
 
@@ -194,13 +284,16 @@ async function calculateReorder(medicine) {
 
     monthlyNeed,
 
+    targetStock,
+
     stockLasts,
 
     reorderQuantity,
 
     priority,
 
-    supplier: medicine.supplier,
+    supplier:
+      medicine.supplier,
 
     purchasePrice:
       medicine.purchasePrice,
@@ -214,15 +307,14 @@ async function calculateReorder(medicine) {
     qrCode:
       medicine.qrCode,
 
-    // Extra information for debugging
-    // and UI if needed.
-
+    // Incoming stock information
     outstandingOrderQuantity,
 
-    effectiveStock,
-  };
-}
+    effectiveStock
 
+  };
+
+}
 
 
 // ═════════════════════════════════════════════
@@ -241,8 +333,7 @@ router.get(
 
     try {
 
-      // Get active medicines only.
-
+      // Only active medicines
       const medicines =
         await Medicine.find({
 
@@ -256,12 +347,10 @@ router.get(
         });
 
 
-
       const suggestions = [];
 
 
-
-      // Calculate reorder for every medicine.
+      // Calculate reorder for every medicine
 
       for (
         const medicine of medicines
@@ -273,9 +362,8 @@ router.get(
           );
 
 
-
-        // Only medicines that actually
-        // need additional stock.
+        // Only medicines which actually
+        // require additional stock.
 
         if (
           result.reorderQuantity > 0
@@ -288,7 +376,6 @@ router.get(
         }
 
       }
-
 
 
       // ═══════════════════════════════════════
@@ -306,13 +393,11 @@ router.get(
       };
 
 
-
       suggestions.sort(
         (a, b) =>
           priorityOrder[a.priority] -
           priorityOrder[b.priority]
       );
-
 
 
       // ═══════════════════════════════════════
@@ -348,7 +433,6 @@ router.get(
       };
 
 
-
       res.json({
 
         success: true,
@@ -360,7 +444,6 @@ router.get(
       });
 
 
-
     }
 
     catch (err) {
@@ -369,7 +452,6 @@ router.get(
         '❌ Reorder suggestion error:',
         err.message
       );
-
 
 
       res.status(500).json({
@@ -389,7 +471,6 @@ router.get(
   }
 
 );
-
 
 
 // ═════════════════════════════════════════════
@@ -414,7 +495,6 @@ router.get(
         );
 
 
-
       if (!medicine) {
 
         return res.status(404).json({
@@ -429,12 +509,27 @@ router.get(
       }
 
 
+      if (
+        medicine.status === 'expired' ||
+        medicine.status === 'removed'
+      ) {
+
+        return res.status(400).json({
+
+          success: false,
+
+          message:
+            'Expired or removed medicine cannot be reordered'
+
+        });
+
+      }
+
 
       const result =
         await calculateReorder(
           medicine
         );
-
 
 
       res.json({
@@ -447,10 +542,15 @@ router.get(
       });
 
 
-
     }
 
     catch (err) {
+
+      console.log(
+        '❌ Single reorder error:',
+        err.message
+      );
+
 
       res.status(500).json({
 
@@ -466,7 +566,6 @@ router.get(
   }
 
 );
-
 
 
 // ═════════════════════════════════════════════
@@ -491,11 +590,6 @@ router.post(
         priority
       } = req.body;
 
-
-
-      // ═══════════════════════════════════════
-      // DEBUG LOGS
-      // ═══════════════════════════════════════
 
       console.log(
         '================================'
@@ -536,7 +630,6 @@ router.post(
       );
 
 
-
       // ═══════════════════════════════════════
       // VALIDATION
       // ═══════════════════════════════════════
@@ -553,7 +646,6 @@ router.post(
         });
 
       }
-
 
 
       if (
@@ -573,7 +665,6 @@ router.post(
       }
 
 
-
       // ═══════════════════════════════════════
       // FIND MEDICINE
       // ═══════════════════════════════════════
@@ -582,7 +673,6 @@ router.post(
         await Medicine.findById(
           medicineId
         );
-
 
 
       if (!medicine) {
@@ -599,9 +689,8 @@ router.post(
       }
 
 
-
       // ═══════════════════════════════════════
-      // PREVENT ORDER FOR EXPIRED / REMOVED
+      // PREVENT EXPIRED / REMOVED ORDERS
       // ═══════════════════════════════════════
 
       if (
@@ -619,7 +708,6 @@ router.post(
         });
 
       }
-
 
 
       // ═══════════════════════════════════════
@@ -642,8 +730,11 @@ router.post(
           quantity:
             Number(quantity),
 
+          receivedQuantity:
+            0,
+
           currentStock:
-            medicine.quantity,
+            Number(medicine.quantity) || 0,
 
           priority:
             priority ||
@@ -659,15 +750,12 @@ router.post(
         });
 
 
-
       await reorder.save();
-
 
 
       console.log(
         `📦 Reorder created: ${medicine.name} × ${quantity}`
       );
-
 
 
       res.status(201).json({
@@ -683,7 +771,6 @@ router.post(
       });
 
 
-
     }
 
     catch (err) {
@@ -697,7 +784,6 @@ router.post(
         '❌ Full error:',
         err
       );
-
 
 
       res.status(500).json({
@@ -717,7 +803,6 @@ router.post(
   }
 
 );
-
 
 
 // ═════════════════════════════════════════════
@@ -754,7 +839,6 @@ router.get(
           });
 
 
-
       res.json({
 
         success: true,
@@ -767,7 +851,6 @@ router.get(
       });
 
 
-
     }
 
     catch (err) {
@@ -776,7 +859,6 @@ router.get(
         '❌ Reorder history error:',
         err.message
       );
-
 
 
       res.status(500).json({
@@ -797,6 +879,79 @@ router.get(
 
 );
 
+
+// ═════════════════════════════════════════════
+// CLEAR REORDER HISTORY
+// DELETE /api/reorder/orders/history
+// ═════════════════════════════════════════════
+//
+// IMPORTANT:
+// This deletes old reorder records only.
+// Medicine stock is NOT deleted.
+//
+// Useful for starting the demo again
+// with a clean reorder history.
+// ═════════════════════════════════════════════
+
+router.delete(
+  '/orders/history',
+
+  auth,
+
+  pharmacyStaff,
+
+  async (req, res) => {
+
+    try {
+
+      const result =
+        await Reorder.deleteMany({});
+
+
+      console.log(
+        `🗑️ Reorder history cleared: ${result.deletedCount} records`
+      );
+
+
+      res.json({
+
+        success: true,
+
+        message:
+          'Reorder history cleared successfully',
+
+        deletedCount:
+          result.deletedCount
+
+      });
+
+    }
+
+    catch (err) {
+
+      console.log(
+        '❌ Clear reorder history error:',
+        err.message
+      );
+
+
+      res.status(500).json({
+
+        success: false,
+
+        message:
+          'Failed to clear reorder history',
+
+        error:
+          err.message
+
+      });
+
+    }
+
+  }
+
+);
 
 
 // ═════════════════════════════════════════════
@@ -821,19 +976,23 @@ router.put(
       } = req.body;
 
 
-
       // ═══════════════════════════════════════
       // ALLOWED STATUSES
       // ═══════════════════════════════════════
 
       const allowedStatuses = [
-        'pending',
-        'ordered',
-        'partially_received',
-        'received',
-        'cancelled'
-      ];
 
+        'pending',
+
+        'ordered',
+
+        'partially_received',
+
+        'received',
+
+        'cancelled'
+
+      ];
 
 
       if (
@@ -854,7 +1013,6 @@ router.put(
       }
 
 
-
       // ═══════════════════════════════════════
       // FIND REORDER
       // ═══════════════════════════════════════
@@ -863,7 +1021,6 @@ router.put(
         await Reorder.findById(
           req.params.id
         );
-
 
 
       if (!order) {
@@ -878,7 +1035,6 @@ router.put(
         });
 
       }
-
 
 
       // ═══════════════════════════════════════
@@ -906,7 +1062,6 @@ router.put(
         }
 
 
-
         order.status =
           'cancelled';
 
@@ -914,9 +1069,7 @@ router.put(
           new Date();
 
 
-
         await order.save();
-
 
 
         return res.json({
@@ -931,7 +1084,6 @@ router.put(
         });
 
       }
-
 
 
       // ═══════════════════════════════════════
@@ -960,7 +1112,6 @@ router.put(
         }
 
 
-
         order.status =
           status;
 
@@ -968,9 +1119,7 @@ router.put(
           new Date();
 
 
-
         await order.save();
-
 
 
         return res.json({
@@ -985,7 +1134,6 @@ router.put(
         });
 
       }
-
 
 
       // ═══════════════════════════════════════
@@ -1003,8 +1151,9 @@ router.put(
           );
 
 
-
-        // Validate received quantity
+        // ═══════════════════════════════════
+        // VALIDATE RECEIVED QUANTITY
+        // ═══════════════════════════════════
 
         if (
           !Number.isInteger(
@@ -1023,7 +1172,6 @@ router.put(
           });
 
         }
-
 
 
         // Cannot receive more than ordered
@@ -1045,12 +1193,10 @@ router.put(
         }
 
 
-
         const oldReceivedQuantity =
           Number(
             order.receivedQuantity
           ) || 0;
-
 
 
         // Cannot decrease received quantity
@@ -1072,16 +1218,16 @@ router.put(
         }
 
 
-
-        // Calculate newly received stock
+        // Newly received stock only
 
         const receivedNow =
           totalReceived -
           oldReceivedQuantity;
 
 
-
-        // Received status requires full quantity
+        // ═══════════════════════════════════
+        // RECEIVED = FULL QUANTITY
+        // ═══════════════════════════════════
 
         if (
           status === 'received' &&
@@ -1101,8 +1247,9 @@ router.put(
         }
 
 
-
-        // Partial status cannot equal full quantity
+        // ═══════════════════════════════════
+        // PARTIAL = NOT FULL QUANTITY
+        // ═══════════════════════════════════
 
         if (
           status ===
@@ -1123,7 +1270,6 @@ router.put(
         }
 
 
-
         // ═══════════════════════════════════
         // FIND MEDICINE
         // ═══════════════════════════════════
@@ -1132,7 +1278,6 @@ router.put(
           await Medicine.findById(
             order.medicine
           );
-
 
 
         if (!medicine) {
@@ -1149,8 +1294,10 @@ router.put(
         }
 
 
-
-        // Prevent stock receiving for removed/expired medicine
+        // ═══════════════════════════════════
+        // PREVENT STOCK RECEIVING
+        // FOR EXPIRED / REMOVED MEDICINE
+        // ═══════════════════════════════════
 
         if (
           medicine.status ===
@@ -1171,7 +1318,6 @@ router.put(
         }
 
 
-
         // ═══════════════════════════════════
         // UPDATE MEDICINE STOCK
         // ═══════════════════════════════════
@@ -1186,21 +1332,17 @@ router.put(
             ) || 0;
 
 
-
           medicine.quantity =
             oldStock +
             receivedNow;
 
 
-
           await medicine.save();
-
 
 
           console.log(
             `📦 Stock received: ${medicine.name} +${receivedNow}`
           );
-
 
 
           console.log(
@@ -1210,7 +1352,6 @@ router.put(
         }
 
 
-
         // ═══════════════════════════════════
         // UPDATE REORDER
         // ═══════════════════════════════════
@@ -1218,20 +1359,14 @@ router.put(
         order.receivedQuantity =
           totalReceived;
 
-
-
         order.status =
           status;
-
-
 
         order.updatedAt =
           new Date();
 
 
-
         await order.save();
-
 
 
         // ═══════════════════════════════════
@@ -1275,12 +1410,10 @@ router.put(
       );
 
 
-
       console.log(
         '❌ Full error:',
         err
       );
-
 
 
       return res.status(500).json({
@@ -1302,5 +1435,8 @@ router.put(
 );
 
 
+// ═════════════════════════════════════════════
+// EXPORT ROUTER
+// ═════════════════════════════════════════════
 
 module.exports = router;

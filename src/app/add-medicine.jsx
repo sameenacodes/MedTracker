@@ -136,9 +136,16 @@ export default function AddMedicine() {
     'Vitamin',
     'Antacid',
     'Cough Syrup',
+    'Allergy',
+    'Diabetes',
+    'Blood Pressure',
+    'Heart / Cholesterol',
+    'Respiratory / Asthma',
+    'Digestive Health',
+    'Skin Care',
+    'Antifungal',
     'Other',
-
-  ];
+ ];
 
 
   // =====================================================
