@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   ActivityIndicator,
@@ -16,7 +16,6 @@ import {
 
 import { getData } from "../services/storage";
 
-
 // ======================================================
 // API URL
 // ======================================================
@@ -26,15 +25,18 @@ const BASE_URL =
     ? "https://medtracker-1.onrender.com/api"
     : "https://medtracker-1.onrender.com/api";
 
-
 // ======================================================
 // COMPONENT
 // ======================================================
 
 export default function AIChat() {
-
   const router = useRouter();
 
+  // ====================================================
+  // CHAT LIST REF
+  // ====================================================
+
+  const flatListRef = useRef(null);
 
   // ====================================================
   // MESSAGES
@@ -44,7 +46,6 @@ export default function AIChat() {
     {
       id: "1",
       type: "bot",
-
       text:
         "Hi! I'm your MedTracker AI Assistant 👋\n\n" +
         "I can help you check medicine stock, expiry dates, " +
@@ -52,20 +53,17 @@ export default function AIChat() {
     },
   ]);
 
-
   // ====================================================
   // INPUT
   // ====================================================
 
   const [input, setInput] = useState("");
 
-
   // ====================================================
   // LOADING
   // ====================================================
 
   const [loading, setLoading] = useState(false);
-
 
   // ====================================================
   // QUICK QUESTIONS
@@ -77,145 +75,136 @@ export default function AIChat() {
     "Show low stock medicines",
     "What should I reorder?",
     "Which medicines expire this week?",
+    "Which medicines are expired?",
+    "Show all medicines",
+    "Show medicines with zero stock",
+    "Which medicines need attention?",
+    "Which medicines have high expiry risk?",
+    "Show medicines expiring soon",
+    "Which medicines expire this month?",
+    "Show medicines with available stock",
+    "Which medicine has the lowest stock?",
+    "Show medicines with high stock",
+    "Show today's sales summary",
+    "Show recent sales",
+    "Which medicines need replenishment?",
+    "Show reorder suggestions",
+    "Which medicines are critical?",
+    "How much stock do I have?",
+    "Which medicines have stock problems?",
+    "Show medicine expiry status",
+    "Give me a pharmacy inventory summary",
   ];
 
+  // ====================================================
+  // AUTO SCROLL
+  // ====================================================
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (flatListRef.current) {
+        flatListRef.current.scrollToEnd({
+          animated: true,
+        });
+      }
+    }, 100);
+
+    return () => clearTimeout(timer);
+  }, [messages, loading]);
 
   // ====================================================
   // SEND MESSAGE
   // ====================================================
 
-  const sendMessage = async (
-    customMessage = null
-  ) => {
-
-    const userMessage =
-      (
-        customMessage !== null
-          ? customMessage
-          : input
-      )
-        .trim();
-
+  const sendMessage = async (customMessage = null) => {
+    const userMessage = (
+      customMessage !== null ? customMessage : input
+    ).trim();
 
     // Empty message
     if (!userMessage) {
       return;
     }
 
-
     // Prevent multiple requests
     if (loading) {
       return;
     }
 
-
     // Clear input
     setInput("");
-
 
     // ==================================================
     // USER MESSAGE
     // ==================================================
 
     const userMsg = {
-      id:
-        `user-${Date.now()}`,
-
-      type:
-        "user",
-
-      text:
-        userMessage,
+      id: `user-${Date.now()}`,
+      type: "user",
+      text: userMessage,
     };
 
-
-    setMessages(
-      (prev) => [
-        ...prev,
-        userMsg,
-      ]
-    );
-
+    setMessages((prev) => [
+      ...prev,
+      userMsg,
+    ]);
 
     setLoading(true);
 
-
     try {
-
       // =================================================
       // GET LOGIN TOKEN
       // =================================================
 
-      const token =
-        await getData("token");
-
+      const token = await getData("token");
 
       if (!token) {
-
         const loginMessage = {
-          id:
-            `error-${Date.now()}`,
-
-          type:
-            "bot",
-
+          id: `error-${Date.now()}`,
+          type: "bot",
           text:
             "Your login session has expired. Please login again and try.",
         };
 
-
-        setMessages(
-          (prev) => [
-            ...prev,
-            loginMessage,
-          ]
-        );
-
+        setMessages((prev) => [
+          ...prev,
+          loginMessage,
+        ]);
 
         setLoading(false);
 
         return;
       }
 
-
       // =================================================
       // API REQUEST
       // =================================================
 
-      const response =
-        await fetch(
-          `${BASE_URL}/ai-chat`,
-          {
-            method:
-              "POST",
+      const response = await fetch(
+        `${BASE_URL}/ai-chat`,
+        {
+          method: "POST",
 
-            headers: {
-              "Content-Type":
-                "application/json",
+          headers: {
+            "Content-Type": "application/json",
 
-              Authorization:
-                `Bearer ${token}`,
-            },
+            Authorization:
+              `Bearer ${token}`,
+          },
 
-            body:
-              JSON.stringify({
-                message:
-                  userMessage,
-              }),
-          }
-        );
-
+          body: JSON.stringify({
+            message: userMessage,
+          }),
+        }
+      );
 
       // =================================================
       // RESPONSE
       // =================================================
 
-      const data =
-        await response.json();
-
+      const data = await response.json();
 
       if (!response.ok) {
-
         throw new Error(
           data.reply ||
           data.message ||
@@ -223,152 +212,113 @@ export default function AIChat() {
         );
       }
 
-
       // =================================================
       // BOT MESSAGE
       // =================================================
 
       const botMsg = {
-        id:
-          `bot-${Date.now()}`,
-
-        type:
-          "bot",
-
+        id: `bot-${Date.now()}`,
+        type: "bot",
         text:
           data.reply ||
           "Sorry, I couldn't understand that request.",
       };
 
-
-      setMessages(
-        (prev) => [
-          ...prev,
-          botMsg,
-        ]
-      );
-
+      setMessages((prev) => [
+        ...prev,
+        botMsg,
+      ]);
 
     } catch (error) {
-
       console.log(
         "AI Chat Error:",
         error
       );
-
 
       // =================================================
       // ERROR MESSAGE
       // =================================================
 
       const errorMsg = {
-        id:
-          `error-${Date.now()}`,
-
-        type:
-          "bot",
-
+        id: `error-${Date.now()}`,
+        type: "bot",
         text:
           "Unable to connect to MedTracker server.\n\n" +
           "Please check that:\n" +
           "• Backend is running\n" +
-          "• Phone and laptop are on the same Wi-Fi\n" +
-          "• API IP address is correct",
+          "• Internet connection is available\n" +
+          "• API address is correct",
       };
 
-
-      setMessages(
-        (prev) => [
-          ...prev,
-          errorMsg,
-        ]
-      );
+      setMessages((prev) => [
+        ...prev,
+        errorMsg,
+      ]);
 
     } finally {
-
       setLoading(false);
-
     }
-
   };
-
 
   // ====================================================
   // RENDER MESSAGE
   // ====================================================
 
-  const renderMessage =
-    ({ item }) => {
+  const renderMessage = ({ item }) => {
+    const isUser = item.type === "user";
 
-      const isUser =
-        item.type === "user";
+    return (
+      <View
+        style={[
+          styles.messageRow,
+          isUser && styles.userMessageRow,
+        ]}
+      >
 
+        {/* BOT ICON */}
 
-      return (
+        {!isUser && (
+          <View style={styles.botIcon}>
+            <Ionicons
+              name="sparkles"
+              size={18}
+              color="#176B52"
+            />
+          </View>
+        )}
+
+        {/* MESSAGE */}
+
         <View
           style={[
-            styles.messageRow,
-
-            isUser &&
-              styles.userMessageRow,
+            styles.messageBubble,
+            isUser
+              ? styles.userBubble
+              : styles.botBubble,
           ]}
         >
-
-          {/* BOT ICON */}
-
-          {!isUser && (
-            <View
-              style={styles.botIcon}
-            >
-              <Ionicons
-                name="sparkles"
-                size={18}
-                color="#176B52"
-              />
-            </View>
-          )}
-
-
-          {/* MESSAGE */}
-
-          <View
+          <Text
             style={[
-              styles.messageBubble,
-
-              isUser
-                ? styles.userBubble
-                : styles.botBubble,
+              styles.messageText,
+              isUser &&
+                styles.userMessageText,
             ]}
           >
-
-            <Text
-              style={[
-                styles.messageText,
-
-                isUser &&
-                  styles.userMessageText,
-              ]}
-            >
-              {item.text}
-            </Text>
-
-          </View>
-
+            {item.text}
+          </Text>
         </View>
-      );
 
-    };
-
+      </View>
+    );
+  };
 
   // ====================================================
   // MAIN UI
   // ====================================================
 
   return (
-
     <KeyboardAvoidingView
       style={styles.container}
-
       behavior={
         Platform.OS === "ios"
           ? "padding"
@@ -380,45 +330,33 @@ export default function AIChat() {
           HEADER
       ================================================= */}
 
-      <View
-        style={styles.header}
-      >
+      <View style={styles.header}>
 
         {/* BACK */}
 
         <TouchableOpacity
           style={styles.backButton}
-
           onPress={() =>
             router.back()
           }
-
           activeOpacity={0.7}
         >
-
           <Ionicons
             name="arrow-back"
             size={22}
             color="#17201C"
           />
-
         </TouchableOpacity>
-
 
         {/* AI ICON */}
 
-        <View
-          style={styles.headerIcon}
-        >
-
+        <View style={styles.headerIcon}>
           <Ionicons
             name="sparkles"
             size={22}
             color="#176B52"
           />
-
         </View>
-
 
         {/* HEADER TEXT */}
 
@@ -427,18 +365,15 @@ export default function AIChat() {
             styles.headerTextContainer
           }
         >
-
           <Text
             style={styles.headerTitle}
           >
             AI Pharmacy Assistant
           </Text>
 
-
           <View
             style={styles.onlineRow}
           >
-
             <View
               style={styles.onlineDot}
             />
@@ -448,97 +383,117 @@ export default function AIChat() {
             >
               Connected to inventory
             </Text>
-
           </View>
-
         </View>
 
       </View>
 
-
       {/* =================================================
           QUICK SUGGESTIONS
+
+          IMPORTANT:
+          Always visible now.
       ================================================= */}
 
-      {messages.length <= 1 && (
+      <View
+        style={
+          styles.suggestionsContainer
+        }
+      >
 
         <View
           style={
-            styles.suggestionsContainer
+            styles.suggestionHeaderRow
           }
         >
-
           <Text
             style={
               styles.suggestionTitle
             }
           >
-            Try asking
+            Quick pharmacy questions
           </Text>
 
-
-          <FlatList
-            data={suggestions}
-
-            horizontal
-
-            showsHorizontalScrollIndicator={
-              false
+          <Text
+            style={
+              styles.suggestionHint
             }
-
-            keyExtractor={
-              (item) => item
-            }
-
-            contentContainerStyle={{
-              paddingHorizontal: 18,
-            }}
-
-            renderItem={({
-              item,
-            }) => (
-
-              <TouchableOpacity
-                style={
-                  styles.suggestionChip
-                }
-
-                onPress={() =>
-                  sendMessage(item)
-                }
-
-                activeOpacity={0.75}
-              >
-
-                <Text
-                  style={
-                    styles.suggestionText
-                  }
-                >
-                  {item}
-                </Text>
-
-              </TouchableOpacity>
-
-            )}
-          />
-
+          >
+            Tap to ask
+          </Text>
         </View>
 
-      )}
+        <FlatList
+          data={suggestions}
 
+          horizontal
+
+          showsHorizontalScrollIndicator={
+            false
+          }
+
+          keyExtractor={(item, index) =>
+            `${item}-${index}`
+          }
+
+          contentContainerStyle={{
+            paddingHorizontal: 18,
+          }}
+
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              style={[
+                styles.suggestionChip,
+                loading &&
+                  styles.suggestionChipDisabled,
+              ]}
+              onPress={() =>
+                sendMessage(item)
+              }
+              disabled={loading}
+              activeOpacity={0.75}
+            >
+              <Ionicons
+                name="sparkles-outline"
+                size={14}
+                color={
+                  loading
+                    ? "#9AA49F"
+                    : "#176B52"
+                }
+                style={{
+                  marginRight: 6,
+                }}
+              />
+
+              <Text
+                style={[
+                  styles.suggestionText,
+                  loading &&
+                    styles.suggestionTextDisabled,
+                ]}
+              >
+                {item}
+              </Text>
+            </TouchableOpacity>
+          )}
+        />
+
+      </View>
 
       {/* =================================================
           CHAT
       ================================================= */}
 
       <FlatList
+        ref={flatListRef}
+
         data={messages}
 
         renderItem={renderMessage}
 
-        keyExtractor={
-          (item) => item.id
+        keyExtractor={(item) =>
+          item.id
         }
 
         contentContainerStyle={
@@ -551,10 +506,18 @@ export default function AIChat() {
 
         keyboardShouldPersistTaps="handled"
 
+        onContentSizeChange={() => {
+          setTimeout(() => {
+            if (flatListRef.current) {
+              flatListRef.current.scrollToEnd({
+                animated: true,
+              });
+            }
+          }, 50);
+        }}
+
         ListFooterComponent={
-
           loading ? (
-
             <View
               style={
                 styles.typingContainer
@@ -566,15 +529,12 @@ export default function AIChat() {
               <View
                 style={styles.botIcon}
               >
-
                 <Ionicons
                   name="sparkles"
                   size={18}
                   color="#176B52"
                 />
-
               </View>
-
 
               {/* LOADING */}
 
@@ -583,7 +543,6 @@ export default function AIChat() {
                   styles.typingBubble
                 }
               >
-
                 <ActivityIndicator
                   size="small"
                   color="#176B52"
@@ -596,15 +555,12 @@ export default function AIChat() {
                 >
                   Checking pharmacy data...
                 </Text>
-
               </View>
 
             </View>
-
           ) : null
         }
       />
-
 
       {/* =================================================
           INPUT AREA
@@ -644,7 +600,6 @@ export default function AIChat() {
             }
           />
 
-
           {/* SEND BUTTON */}
 
           <TouchableOpacity
@@ -669,17 +624,14 @@ export default function AIChat() {
 
             activeOpacity={0.8}
           >
-
             <Ionicons
               name="arrow-up"
               size={20}
               color="#FFFFFF"
             />
-
           </TouchableOpacity>
 
         </View>
-
 
         {/* DISCLAIMER */}
 
@@ -688,17 +640,15 @@ export default function AIChat() {
             styles.disclaimer
           }
         >
-          AI Assistant uses your MedTracker inventory data.
+          AI Assistant uses your MedTracker
+          inventory data.
         </Text>
 
       </View>
 
     </KeyboardAvoidingView>
-
   );
-
 }
-
 
 // ======================================================
 // STYLES
@@ -717,7 +667,6 @@ const styles =
       backgroundColor:
         "#F8FAF9",
     },
-
 
     // ==================================================
     // HEADER
@@ -751,7 +700,6 @@ const styles =
         "#E7ECE9",
     },
 
-
     backButton: {
       width: 40,
 
@@ -767,7 +715,6 @@ const styles =
 
       marginRight: 10,
     },
-
 
     headerIcon: {
       width: 42,
@@ -788,11 +735,9 @@ const styles =
       marginRight: 11,
     },
 
-
     headerTextContainer: {
       flex: 1,
     },
-
 
     headerTitle: {
       fontSize: 17,
@@ -803,7 +748,6 @@ const styles =
         "#17201C",
     },
 
-
     onlineRow: {
       flexDirection:
         "row",
@@ -813,7 +757,6 @@ const styles =
 
       marginTop: 3,
     },
-
 
     onlineDot: {
       width: 7,
@@ -828,7 +771,6 @@ const styles =
       marginRight: 6,
     },
 
-
     onlineText: {
       fontSize: 11,
 
@@ -836,33 +778,62 @@ const styles =
         "#718078",
     },
 
-
     // ==================================================
     // SUGGESTIONS
     // ==================================================
 
     suggestionsContainer: {
-      paddingTop: 18,
+      paddingTop: 14,
 
-      paddingBottom: 8,
+      paddingBottom: 10,
+
+      backgroundColor:
+        "#F8FAF9",
+
+      borderBottomWidth: 1,
+
+      borderBottomColor:
+        "#E7ECE9",
     },
 
+    suggestionHeaderRow: {
+      flexDirection:
+        "row",
 
-    suggestionTitle: {
-      fontSize: 13,
+      alignItems:
+        "center",
 
-      fontWeight: "600",
-
-      color:
-        "#5E6964",
+      justifyContent:
+        "space-between",
 
       marginHorizontal: 18,
 
       marginBottom: 10,
     },
 
+    suggestionTitle: {
+      fontSize: 13,
+
+      fontWeight: "700",
+
+      color:
+        "#46534D",
+    },
+
+    suggestionHint: {
+      fontSize: 10,
+
+      color:
+        "#8A9690",
+    },
 
     suggestionChip: {
+      flexDirection:
+        "row",
+
+      alignItems:
+        "center",
+
       backgroundColor:
         "#FFFFFF",
 
@@ -878,8 +849,13 @@ const styles =
       borderRadius: 18,
 
       marginRight: 8,
+
+      minHeight: 38,
     },
 
+    suggestionChipDisabled: {
+      opacity: 0.55,
+    },
 
     suggestionText: {
       fontSize: 12,
@@ -890,6 +866,10 @@ const styles =
       fontWeight: "600",
     },
 
+    suggestionTextDisabled: {
+      color:
+        "#9AA49F",
+    },
 
     // ==================================================
     // CHAT
@@ -898,13 +878,12 @@ const styles =
     chatContent: {
       paddingHorizontal: 16,
 
-      paddingTop: 10,
+      paddingTop: 14,
 
       paddingBottom: 15,
 
       flexGrow: 1,
     },
-
 
     messageRow: {
       flexDirection:
@@ -916,12 +895,10 @@ const styles =
       marginBottom: 14,
     },
 
-
     userMessageRow: {
       justifyContent:
         "flex-end",
     },
-
 
     botIcon: {
       width: 34,
@@ -942,7 +919,6 @@ const styles =
       marginRight: 8,
     },
 
-
     messageBubble: {
       maxWidth:
         "78%",
@@ -957,7 +933,6 @@ const styles =
         17,
     },
 
-
     botBubble: {
       backgroundColor:
         "#FFFFFF",
@@ -971,7 +946,6 @@ const styles =
         5,
     },
 
-
     userBubble: {
       backgroundColor:
         "#176B52",
@@ -979,7 +953,6 @@ const styles =
       borderBottomRightRadius:
         5,
     },
-
 
     messageText: {
       fontSize: 14,
@@ -990,12 +963,10 @@ const styles =
         "#26312C",
     },
 
-
     userMessageText: {
       color:
         "#FFFFFF",
     },
-
 
     // ==================================================
     // TYPING / LOADING
@@ -1010,7 +981,6 @@ const styles =
 
       marginBottom: 12,
     },
-
 
     typingBubble: {
       flexDirection:
@@ -1037,7 +1007,6 @@ const styles =
         16,
     },
 
-
     typingText: {
       marginLeft: 8,
 
@@ -1047,7 +1016,6 @@ const styles =
         "#68746E",
     },
 
-
     // ==================================================
     // INPUT
     // ==================================================
@@ -1056,7 +1024,8 @@ const styles =
       backgroundColor:
         "#FFFFFF",
 
-      borderTopWidth: 1,
+      borderTopWidth:
+        1,
 
       borderTopColor:
         "#E5EBE8",
@@ -1071,7 +1040,6 @@ const styles =
           ? 24
           : 12,
     },
-
 
     inputWrapper: {
       flexDirection:
@@ -1097,7 +1065,6 @@ const styles =
       minHeight: 50,
     },
 
-
     input: {
       flex: 1,
 
@@ -1110,7 +1077,6 @@ const styles =
 
       maxHeight: 100,
     },
-
 
     sendButton: {
       width: 40,
@@ -1131,12 +1097,10 @@ const styles =
       marginBottom: 4,
     },
 
-
     sendButtonDisabled: {
       backgroundColor:
         "#A9B8B1",
     },
-
 
     // ==================================================
     // DISCLAIMER
