@@ -5,7 +5,7 @@ import { getData } from './storage';
 const BACKEND_URL = 'https://medtracker-1.onrender.com';
 
 // =====================================================
-// PICK MEDICINE IMAGE FROM GALLERY
+// PICK IMAGE
 // =====================================================
 
 export const pickMedicineImage = async () => {
@@ -34,14 +34,14 @@ export const pickMedicineImage = async () => {
     }
 
     return null;
-  } catch (err) {
-    console.log('Image picker error:', err);
+  } catch (error) {
+    console.log('Image picker error:', error);
     return null;
   }
 };
 
 // =====================================================
-// TAKE MEDICINE PHOTO
+// TAKE PHOTO
 // =====================================================
 
 export const takePhoto = async () => {
@@ -69,33 +69,19 @@ export const takePhoto = async () => {
     }
 
     return null;
-  } catch (err) {
-    console.log('Camera error:', err);
+  } catch (error) {
+    console.log('Camera error:', error);
     return null;
   }
 };
 
 // =====================================================
-// MAIN OCR FUNCTION
+// MAIN OCR
 // =====================================================
 
 export const extractMedicineDetails = async (imageUri) => {
   try {
-    console.log('================================');
-    console.log('🧠 STARTING BACKEND MEDICINE OCR');
-    console.log('Image:', imageUri);
-    console.log('================================');
-
-    // ==========================================
-    // GET LOGIN TOKEN
-    // ==========================================
-
     const token = await getData('token');
-
-    console.log(
-      '🔐 OCR TOKEN:',
-      token ? 'FOUND' : 'NOT FOUND'
-    );
 
     if (!token) {
       throw new Error(
@@ -103,82 +89,31 @@ export const extractMedicineDetails = async (imageUri) => {
       );
     }
 
-    // ==========================================
-    // CREATE IMAGE FILE
-    // ==========================================
-
     const file = new File(imageUri);
 
-    console.log(
-      '📁 File exists:',
-      file.exists
-    );
-
-    console.log(
-      '📁 File type:',
-      file.type
-    );
-
-    console.log(
-      '📁 File size:',
-      file.size
-    );
-
-    // ==========================================
-    // CREATE FORM DATA
-    // ==========================================
-
     const formData = new FormData();
-
     formData.append('image', file);
-
-    // ==========================================
-    // SEND IMAGE + JWT TOKEN TO BACKEND
-    // ==========================================
 
     const response = await fetch(
       `${BACKEND_URL}/api/ocr/medicine`,
       {
         method: 'POST',
-
         headers: {
           Authorization: `Bearer ${token}`,
         },
-
         body: formData,
       }
     );
 
-    console.log(
-      'OCR backend status:',
-      response.status
-    );
-
-    // ==========================================
-    // READ BACKEND RESPONSE
-    // ==========================================
-
     const result = await response.json();
-
-    console.log('================================');
-    console.log('📝 BACKEND OCR RESPONSE');
-    console.log(result);
-    console.log('================================');
 
     if (!response.ok) {
       throw new Error(
-        result?.message ||
-        'OCR request failed'
+        result?.message || 'OCR request failed'
       );
     }
 
-    const rawText =
-      result?.rawText || '';
-
-    console.log('================================');
-    console.log('🔤 RAW OCR TEXT');
-    console.log(rawText);
-    console.log('================================');
+    const rawText = result?.rawText || '';
 
     if (!rawText.trim()) {
       return {
@@ -194,17 +129,7 @@ export const extractMedicineDetails = async (imageUri) => {
       };
     }
 
-    // ==========================================
-    // PARSE MEDICINE DETAILS
-    // ==========================================
-
-    const details =
-      parseMedicineDetails(rawText);
-
-    console.log('================================');
-    console.log('💊 FINAL OCR DETAILS');
-    console.log(details);
-    console.log('================================');
+    const details = parseMedicineDetails(rawText);
 
     return {
       rawText,
@@ -230,26 +155,17 @@ export const extractMedicineDetails = async (imageUri) => {
       mrp:
         details.mrp,
 
-      success:
-        !!(
-          details.medicineName ||
-          details.brandName ||
-          details.batchNumber ||
-          details.mfgDate ||
-          details.expiryDate
-        ),
+      success: !!(
+        details.medicineName ||
+        details.brandName ||
+        details.batchNumber ||
+        details.mfgDate ||
+        details.expiryDate
+      ),
     };
 
-  } catch (err) {
-
-    console.log('================================');
-    console.log('❌ BACKEND OCR ERROR');
-    console.log(err);
-    console.log(
-      'Message:',
-      err?.message
-    );
-    console.log('================================');
+  } catch (error) {
+    console.log('OCR ERROR:', error);
 
     return {
       rawText: '',
@@ -266,26 +182,17 @@ export const extractMedicineDetails = async (imageUri) => {
 };
 
 // =====================================================
-// PARSE MEDICINE DETAILS
+// MAIN PARSER
 // =====================================================
 
 export const parseMedicineDetails = (text) => {
-
   if (!text) {
-    return {
-      medicineName: null,
-      brandName: null,
-      category: null,
-      batchNumber: null,
-      mfgDate: null,
-      expiryDate: null,
-      mrp: null,
-    };
+    return emptyDetails();
   }
 
-  // ===================================================
-  // CLEAN TEXT
-  // ===================================================
+  // ---------------------------------------------------
+  // CLEAN OCR
+  // ---------------------------------------------------
 
   const cleanText = String(text)
     .replace(/\r/g, '\n')
@@ -293,9 +200,6 @@ export const parseMedicineDetails = (text) => {
     .replace(/\|/g, 'I')
     .replace(/[ \t]+/g, ' ')
     .trim();
-
-  const upperText =
-    cleanText.toUpperCase();
 
   const lines = cleanText
     .split('\n')
@@ -310,208 +214,113 @@ export const parseMedicineDetails = (text) => {
     line.toUpperCase()
   );
 
-  const oneLineText =
-    upperText
-      .replace(/\n/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
+  const oneLineText = cleanText
+    .replace(/\n/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase();
 
-  console.log(
-    '🧹 CLEAN OCR TEXT:',
-    oneLineText
-  );
-
-  // ===================================================
-  // DATE HELPER
-  // ===================================================
-
-  const normalizeDate = (month, year) => {
-
-    const monthNumber =
-      parseInt(month, 10);
-
-    const yearNumber =
-      parseInt(year, 10);
-
-    if (
-      isNaN(monthNumber) ||
-      isNaN(yearNumber)
-    ) {
-      return null;
-    }
-
-    if (
-      monthNumber < 1 ||
-      monthNumber > 12
-    ) {
-      return null;
-    }
-
-    if (
-      yearNumber < 2000 ||
-      yearNumber > 2100
-    ) {
-      return null;
-    }
-
-    return (
-      `${String(monthNumber).padStart(2, '0')}/${yearNumber}`
-    );
-  };
+  console.log('================================');
+  console.log('🧠 SMART MEDICINE OCR PARSER');
+  console.log('================================');
+  console.log(oneLineText);
 
   // ===================================================
-  // EXPIRY DATE
-  // IMPORTANT:
-  // Search expiry label FIRST.
-  // Never use MFG date as expiry if expiry exists.
+  // DATE EXTRACTION
   // ===================================================
 
   let expiryDate = null;
+  let mfgDate = null;
+
+  // ---------------------------------------------------
+  // EXPIRY
+  // ---------------------------------------------------
 
   const expiryPatterns = [
+    /(?:EXPIRY\s*DATE|EXPIRY|EXP\s*DATE|EXP|USE\s*BEFORE|BEST\s*BEFORE)\s*[:.\-]?\s*(\d{1,2})\s*[\/.\-]\s*(20\d{2})/i,
 
-    /EXPIRY\s*DATE\s*[:.\-]?\s*(\d{1,2})\s*[\/\-.]\s*(20\d{2})/i,
-
-    /EXPIRY\s*[:.\-]?\s*(\d{1,2})\s*[\/\-.]\s*(20\d{2})/i,
-
-    /EXP\s*DATE\s*[:.\-]?\s*(\d{1,2})\s*[\/\-.]\s*(20\d{2})/i,
-
-    /EXP\s*[:.\-]?\s*(\d{1,2})\s*[\/\-.]\s*(20\d{2})/i,
-
-    /USE\s*BEFORE\s*[:.\-]?\s*(\d{1,2})\s*[\/\-.]\s*(20\d{2})/i,
-
-    /BEST\s*BEFORE\s*[:.\-]?\s*(\d{1,2})\s*[\/\-.]\s*(20\d{2})/i,
-
+    /(?:EXPIRY\s*DATE|EXPIRY|EXP\s*DATE|EXP|USE\s*BEFORE|BEST\s*BEFORE)\s*[:.\-]?\s*(\d{1,2})\s*[\s\-\/]*(20\d{2})/i,
   ];
 
   for (const pattern of expiryPatterns) {
-
-    const match =
-      oneLineText.match(pattern);
+    const match = oneLineText.match(pattern);
 
     if (match) {
-
       expiryDate =
-        normalizeDate(
-          match[1],
-          match[2]
-        );
+        normalizeDate(match[1], match[2]);
 
-      if (expiryDate) {
-        break;
-      }
+      if (expiryDate) break;
     }
   }
 
-  // ===================================================
-  // LINE BASED EXPIRY
-  // ===================================================
-
+  // Line-based expiry
   if (!expiryDate) {
-
     for (const line of upperLines) {
-
       if (
-        line.includes('EXPIRY') ||
-        line.includes('EXP DATE') ||
-        line.includes('EXP:')
+        /EXPIRY|EXP\s*DATE|EXP:|USE\s*BEFORE|BEST\s*BEFORE/.test(
+          line
+        )
       ) {
-
-        const match =
-          line.match(
-            /(\d{1,2})\s*[\/\-.]\s*(20\d{2})/
-          );
+        const match = line.match(
+          /(\d{1,2})\s*[\/.\-]\s*(20\d{2})/
+        );
 
         if (match) {
-
           expiryDate =
             normalizeDate(
               match[1],
               match[2]
             );
 
-          if (expiryDate) {
-            break;
-          }
+          if (expiryDate) break;
         }
       }
     }
   }
 
-  console.log(
-    '📅 EXPIRY DATE:',
-    expiryDate
-  );
-
-  // ===================================================
-  // MFG DATE
-  // ===================================================
-
-  let mfgDate = null;
+  // ---------------------------------------------------
+  // MFG
+  // ---------------------------------------------------
 
   const mfgPatterns = [
+    /(?:MFG\s*DATE|MFG|MFD\s*DATE|MFD|MANUFACTURED\s*DATE)\s*[:.\-]?\s*(\d{1,2})\s*[\/.\-]\s*(20\d{2})/i,
 
-    /MFG\s*DATE\s*[:.\-]?\s*(\d{1,2})\s*[\/\-.]\s*(20\d{2})/i,
-
-    /MFG\s*[:.\-]?\s*(\d{1,2})\s*[\/\-.]\s*(20\d{2})/i,
-
-    /MFD\s*DATE\s*[:.\-]?\s*(\d{1,2})\s*[\/\-.]\s*(20\d{2})/i,
-
-    /MFD\s*[:.\-]?\s*(\d{1,2})\s*[\/\-.]\s*(20\d{2})/i,
-
-    /MANUFACTURED\s*DATE\s*[:.\-]?\s*(\d{1,2})\s*[\/\-.]\s*(20\d{2})/i,
-
-    /MANUFACTURED\s*[:.\-]?\s*(\d{1,2})\s*[\/\-.]\s*(20\d{2})/i,
-
+    /(?:MFG\s*DATE|MFG|MFD\s*DATE|MFD|MANUFACTURED\s*DATE)\s*[:.\-]?\s*(\d{1,2})\s*[\s\-\/]*(20\d{2})/i,
   ];
 
   for (const pattern of mfgPatterns) {
-
-    const match =
-      oneLineText.match(pattern);
+    const match = oneLineText.match(pattern);
 
     if (match) {
-
       mfgDate =
         normalizeDate(
           match[1],
           match[2]
         );
 
-      if (mfgDate) {
-        break;
-      }
+      if (mfgDate) break;
     }
   }
 
-  // ===================================================
-  // LINE BASED MFG
-  // ===================================================
-
+  // Line-based MFG
   if (!mfgDate) {
-
     for (const line of upperLines) {
-
       if (
-        line.includes('MFG') ||
-        line.includes('MFD') ||
-        line.includes('MANUFACTURED')
+        /\bMFG\b|\bMFD\b|MANUFACTURED/.test(
+          line
+        )
       ) {
-
-        const match =
-          line.match(
-            /(\d{1,2})\s*[\/\-.]\s*(20\d{2})/
-          );
+        const match = line.match(
+          /(\d{1,2})\s*[\/.\-]\s*(20\d{2})/
+        );
 
         if (match) {
-
           const candidate =
             normalizeDate(
               match[1],
               match[2]
             );
 
-          // Don't accidentally take expiry
           if (
             candidate &&
             candidate !== expiryDate
@@ -524,106 +333,27 @@ export const parseMedicineDetails = (text) => {
     }
   }
 
-  console.log(
-    '📅 MFG DATE:',
-    mfgDate
-  );
-
-  // ===================================================
-  // FALLBACK DATE DETECTION
-  //
-  // Only use dates if labels are unavailable.
-  // ===================================================
-
-  if (!mfgDate || !expiryDate) {
-
-    const allDates = [];
-
-    const dateRegex =
-      /\b(0?[1-9]|1[0-2])\s*[\/\-.]\s*(20\d{2})\b/g;
-
-    let match;
-
-    while (
-      (match =
-        dateRegex.exec(oneLineText)) !== null
-    ) {
-
-      const value =
-        normalizeDate(
-          match[1],
-          match[2]
-        );
-
-      if (value) {
-        allDates.push(value);
-      }
-    }
-
-    console.log(
-      '📅 ALL DETECTED DATES:',
-      allDates
-    );
-
-    const uniqueDates =
-      [...new Set(allDates)];
-
-    if (
-      !mfgDate &&
-      uniqueDates.length >= 2
-    ) {
-      mfgDate =
-        uniqueDates[0];
-    }
-
-    if (
-      !expiryDate &&
-      uniqueDates.length >= 2
-    ) {
-      expiryDate =
-        uniqueDates[uniqueDates.length - 1];
-    }
-
-    if (
-      !expiryDate &&
-      uniqueDates.length === 1
-    ) {
-      expiryDate =
-        uniqueDates[0];
-    }
-  }
-
   // ===================================================
   // BATCH NUMBER
   // ===================================================
 
   let batchNumber = null;
 
-  // ---------------------------------------------------
-  // Explicit batch patterns
-  // ---------------------------------------------------
+  /*
+   * IMPORTANT:
+   * Batch must come from BATCH / BATCH NO / LOT label.
+   * We do NOT blindly take any alphanumeric word.
+   */
 
   const batchPatterns = [
-
-    /BATCH\s*(?:NO|NUMBER)?\s*[:.\-]?\s*([A-Z0-9][A-Z0-9\/-]{2,30})/i,
-
-    /B\s*\.?\s*NO\s*[:.\-]?\s*([A-Z0-9][A-Z0-9\/-]{2,30})/i,
-
-    /BATCH\s*[:.\-]\s*([A-Z0-9][A-Z0-9\/-]{2,30})/i,
-
-    /LOT\s*(?:NO|NUMBER)?\s*[:.\-]?\s*([A-Z0-9][A-Z0-9\/-]{2,30})/i,
-
-    /LOT\s*[:.\-]\s*([A-Z0-9][A-Z0-9\/-]{2,30})/i,
-
+    /(?:BATCH\s*(?:NO|NUMBER)?|B\.?\s*NO\.?|LOT\s*(?:NO|NUMBER)?)\s*[:.\-]?\s*([A-Z0-9][A-Z0-9\/\-]{2,30})/i,
   ];
 
   for (const pattern of batchPatterns) {
-
     const match =
       oneLineText.match(pattern);
 
     if (match) {
-
       const candidate =
         cleanBatchCandidate(
           match[1]
@@ -632,40 +362,29 @@ export const parseMedicineDetails = (text) => {
       if (
         isValidBatchCandidate(candidate)
       ) {
-
-        batchNumber =
-          candidate;
-
+        batchNumber = candidate;
         break;
       }
     }
   }
 
-  // ---------------------------------------------------
-  // Line based batch
-  // ---------------------------------------------------
-
+  // Line-based batch
   if (!batchNumber) {
-
     for (let i = 0; i < upperLines.length; i++) {
-
-      const line =
-        upperLines[i];
+      const line = upperLines[i];
 
       if (
-        line.includes('BATCH') ||
-        line.includes('B NO') ||
-        line.includes('B.NO') ||
-        line.includes('LOT')
+        /\bBATCH\b|\bB\.?\s*NO\b|\bLOT\b/.test(
+          line
+        )
       ) {
-
+        // Same line
         const sameLine =
           line.match(
-            /(?:BATCH|B\s*\.?\s*NO|LOT)(?:\s*(?:NO|NUMBER))?\s*[:.\-]?\s*([A-Z0-9][A-Z0-9\/-]{2,30})/i
+            /(?:BATCH\s*(?:NO|NUMBER)?|B\.?\s*NO\.?|LOT\s*(?:NO|NUMBER)?)\s*[:.\-]?\s*([A-Z0-9][A-Z0-9\/\-]{2,30})/i
           );
 
         if (sameLine) {
-
           const candidate =
             cleanBatchCandidate(
               sameLine[1]
@@ -674,21 +393,17 @@ export const parseMedicineDetails = (text) => {
           if (
             isValidBatchCandidate(candidate)
           ) {
-
-            batchNumber =
-              candidate;
-
+            batchNumber = candidate;
             break;
           }
         }
 
-        // Try next line
-        if (
-          i + 1 < upperLines.length
-        ) {
-
+        // Next line
+        if (i + 1 < upperLines.length) {
           const nextLine =
-            upperLines[i + 1];
+            upperLines[i + 1]
+              .replace(/[:.\-]/g, '')
+              .trim();
 
           const candidate =
             cleanBatchCandidate(
@@ -698,10 +413,7 @@ export const parseMedicineDetails = (text) => {
           if (
             isValidBatchCandidate(candidate)
           ) {
-
-            batchNumber =
-              candidate;
-
+            batchNumber = candidate;
             break;
           }
         }
@@ -709,207 +421,205 @@ export const parseMedicineDetails = (text) => {
     }
   }
 
-  // ---------------------------------------------------
-  // Generic batch-code fallback
-  // ---------------------------------------------------
-
-  if (!batchNumber) {
-
-    const candidates =
-      oneLineText.match(
-        /\b[A-Z]{1,8}\d{2,12}(?:[-\/][A-Z0-9]{1,12})?\b/g
-      ) || [];
-
-    for (const value of candidates) {
-
-      const candidate =
-        cleanBatchCandidate(value);
-
-      if (
-        candidate.includes('M757') ||
-        candidate === 'MG' ||
-        candidate === 'ML'
-      ) {
-        continue;
-      }
-
-      if (
-        isValidBatchCandidate(candidate)
-      ) {
-
-        batchNumber =
-          candidate;
-
-        break;
-      }
-    }
-  }
-
-  console.log(
-    '🏷️ BATCH NUMBER:',
-    batchNumber
-  );
-
   // ===================================================
   // MEDICINE NAME
   // ===================================================
 
   let medicineName = null;
 
-  // ---------------------------------------------------
-  // Known medicines
-  // ---------------------------------------------------
+  /*
+   * Known medicine / brand patterns.
+   * These are checked FIRST because medicine packs
+   * contain many unrelated text lines.
+   */
 
-  const knownMedicinePatterns = [
-
+  const medicinePatterns = [
     {
       pattern:
         /\bMOXIKLAV\s*[-]?\s*(\d{2,4})(?:\s*MG)?\b/i,
-      name: (match) =>
-        `Moxiklav ${match[1]}`,
+      name: (m) =>
+        `Moxiklav ${m[1]}`,
     },
 
     {
       pattern:
         /\bDOLO\s*[-]?\s*(\d{2,4})(?:\s*MG)?\b/i,
-      name: (match) =>
-        `Dolo ${match[1]}`,
+      name: (m) =>
+        `Dolo ${m[1]}`,
     },
 
     {
       pattern:
         /\bPARACURE\s*[-]?\s*(\d{2,4})(?:\s*MG)?\b/i,
-      name: (match) =>
-        `Paracure ${match[1]}`,
+      name: (m) =>
+        `Paracure ${m[1]}`,
     },
 
     {
       pattern:
-        /\bCEFPODOXIME\s*[-]?\s*(\d{2,4})(?:\s*MG)?\b/i,
-      name: (match) =>
-        `Cefpodoxime ${match[1]}`,
-    },
-
-    {
-      pattern:
-        /\bCEFOPOD\s*[-]?\s*(\d{2,4})(?:\s*MG)?\b/i,
-      name: (match) =>
-        `Cefopod ${match[1]}`,
-    },
-
-    {
-      pattern:
-        /\bCEFIXIME\s*[-]?\s*(\d{2,4})(?:\s*MG)?\b/i,
-      name: (match) =>
-        `Cefixime ${match[1]}`,
-    },
-
-    {
-      pattern:
-        /\bCROCIN\s*[-]?\s*(\d{2,4})?(?:\s*MG)?\b/i,
-      name: (match) =>
-        match[1]
-          ? `Crocin ${match[1]}`
+        /\bCROCIN\s*[-]?\s*(\d{2,4})(?:\s*MG)?\b/i,
+      name: (m) =>
+        m[1]
+          ? `Crocin ${m[1]}`
           : 'Crocin',
     },
 
     {
       pattern:
-        /\bAZITHROMYCIN\s*[-]?\s*(\d{2,4})?(?:\s*MG)?\b/i,
-      name: (match) =>
-        match[1]
-          ? `Azithromycin ${match[1]}`
+        /\bAZITHROMYCIN\s*[-]?\s*(\d{2,4})(?:\s*MG)?\b/i,
+      name: (m) =>
+        m[1]
+          ? `Azithromycin ${m[1]}`
           : 'Azithromycin',
     },
 
     {
       pattern:
-        /\bAMOXICILLIN\s*[-]?\s*(\d{2,4})?(?:\s*MG)?\b/i,
-      name: (match) =>
-        match[1]
-          ? `Amoxicillin ${match[1]}`
+        /\bAMOXICILLIN\s*[-]?\s*(\d{2,4})(?:\s*MG)?\b/i,
+      name: (m) =>
+        m[1]
+          ? `Amoxicillin ${m[1]}`
           : 'Amoxicillin',
     },
 
     {
       pattern:
-        /\bPANTOPRAZOLE\s*[-]?\s*(\d{2,4})?(?:\s*MG)?\b/i,
-      name: (match) =>
-        match[1]
-          ? `Pantoprazole ${match[1]}`
+        /\bPANTOPRAZOLE\s*[-]?\s*(\d{2,4})(?:\s*MG)?\b/i,
+      name: (m) =>
+        m[1]
+          ? `Pantoprazole ${m[1]}`
           : 'Pantoprazole',
     },
 
+    {
+      pattern:
+        /\bPARACETAMOL\s*[-]?\s*(\d{2,4})(?:\s*MG)?\b/i,
+      name: (m) =>
+        m[1]
+          ? `Paracetamol ${m[1]}`
+          : 'Paracetamol',
+    },
+
+    {
+      pattern:
+        /\bIBUPROFEN\s*[-]?\s*(\d{2,4})(?:\s*MG)?\b/i,
+      name: (m) =>
+        m[1]
+          ? `Ibuprofen ${m[1]}`
+          : 'Ibuprofen',
+    },
+
+    {
+      pattern:
+        /\bDICLOFENAC\s*[-]?\s*(\d{2,4})(?:\s*MG)?\b/i,
+      name: (m) =>
+        m[1]
+          ? `Diclofenac ${m[1]}`
+          : 'Diclofenac',
+    },
+
+    {
+      pattern:
+        /\bOMEPRAZOLE\s*[-]?\s*(\d{2,4})(?:\s*MG)?\b/i,
+      name: (m) =>
+        m[1]
+          ? `Omeprazole ${m[1]}`
+          : 'Omeprazole',
+    },
+
+    {
+      pattern:
+        /\bMETFORMIN\s*[-]?\s*(\d{2,4})(?:\s*MG)?\b/i,
+      name: (m) =>
+        m[1]
+          ? `Metformin ${m[1]}`
+          : 'Metformin',
+    },
+
+    {
+      pattern:
+        /\bMONTELUKAST\s*[-]?\s*(\d{2,4})(?:\s*MG)?\b/i,
+      name: (m) =>
+        m[1]
+          ? `Montelukast ${m[1]}`
+          : 'Montelukast',
+    },
+
+    {
+      pattern:
+        /\bCETIRIZINE\s*[-]?\s*(\d{1,3})(?:\s*MG)?\b/i,
+      name: (m) =>
+        m[1]
+          ? `Cetirizine ${m[1]}`
+          : 'Cetirizine',
+    },
+
+    {
+      pattern:
+        /\bCEFIXIME\s*[-]?\s*(\d{2,4})(?:\s*MG)?\b/i,
+      name: (m) =>
+        m[1]
+          ? `Cefixime ${m[1]}`
+          : 'Cefixime',
+    },
+
+    {
+      pattern:
+        /\bCEFPODOXIME\s*[-]?\s*(\d{2,4})(?:\s*MG)?\b/i,
+      name: (m) =>
+        m[1]
+          ? `Cefpodoxime ${m[1]}`
+          : 'Cefpodoxime',
+    },
   ];
 
-  for (
-    const item of knownMedicinePatterns
-  ) {
-
+  for (const item of medicinePatterns) {
     const match =
-      oneLineText.match(
-        item.pattern
-      );
+      oneLineText.match(item.pattern);
 
     if (match) {
-
       medicineName =
         item.name(match);
-
       break;
     }
   }
 
   // ===================================================
-  // GENERIC MEDICINE NAME
+  // GENERIC MEDICINE NAME FALLBACK
   // ===================================================
 
   if (!medicineName) {
-
-    const ignoredWords = [
-
-      'TABLET',
-      'TABLETS',
-      'CAPSULE',
-      'CAPSULES',
-      'INJECTION',
-      'SYRUP',
-      'SUSPENSION',
-      'EACH',
-      'FILM',
-      'COATED',
-      'UNCOATED',
-      'MEDICINE',
-      'PRESCRIPTION',
-      'MANUFACTURED',
-      'MARKETED',
-      'BATCH',
-      'MFG',
-      'MFD',
-      'EXP',
-      'EXPIRY',
-      'DATE',
-      'MRP',
-      'STORE',
-      'BELOW',
-      'PROTECT',
-      'MOISTURE',
-      'KEEP',
-      'CHILDREN',
-      'SCHEDULE',
-      'CAUTION',
-      'DOSAGE',
-      'PHYSICIAN',
-      'INGREDIENT',
-      'INGREDIENTS',
-      'POTASSIUM',
-      'CLAVULANATE',
-      'EQUIVALENT',
-      'EXCIPIENTS',
+    const ignoredPatterns = [
+      /SCHEDULE\s*H/,
+      /PRESCRIPTION\s*DRUG/,
+      /CAUTION/,
+      /MANUFACTURED\s*BY/,
+      /MARKETED\s*BY/,
+      /MFG\s*BY/,
+      /BATCH/,
+      /B\.?\s*NO/,
+      /LOT\s*(?:NO|NUMBER)?/,
+      /MFG\s*DATE/,
+      /MFD\s*DATE/,
+      /EXPIRY/,
+      /EXP\s*DATE/,
+      /MRP/,
+      /STORE\s*BELOW/,
+      /KEEP\s*OUT/,
+      /DOSAGE/,
+      /PHYSICIAN/,
+      /INGREDIENT/,
+      /COMPOSITION/,
+      /EACH\s*TABLET/,
+      /TABLETS?\s*IP/,
+      /CAPSULES?\s*IP/,
+      /INJECTION/,
+      /SYRUP/,
+      /MANUFACTURED/,
+      /MARKETED/,
     ];
 
     for (const line of lines) {
-
       let candidate =
         line
           .replace(/[®™©]/g, '')
@@ -920,209 +630,207 @@ export const parseMedicineDetails = (text) => {
         candidate.toUpperCase();
 
       if (
-        candidate.length < 3
+        candidate.length < 3 ||
+        candidate.length > 60
       ) {
         continue;
       }
 
       if (
-        ignoredWords.some(
-          (word) =>
-            upper === word
+        ignoredPatterns.some(
+          (pattern) =>
+            pattern.test(upper)
         )
       ) {
         continue;
       }
 
+      // Ignore pure dates / numbers
       if (
-        upper.includes('MANUFACTURED') ||
-        upper.includes('MARKETED') ||
-        upper.includes('BATCH') ||
-        upper.includes('EXPIRY') ||
-        upper.includes('MFG DATE') ||
-        upper.includes('MFD DATE') ||
-        upper.includes('MRP') ||
-        upper.includes('DOSAGE') ||
-        upper.includes('STORE BELOW') ||
-        upper.includes('KEEP OUT')
+        /^\d[\d\s./:-]*$/.test(
+          candidate
+        )
       ) {
         continue;
       }
 
-      // Avoid sentences
+      // Ignore manufacturer/company lines
       if (
-        candidate.split(' ').length > 6
+        upper.includes('LABORATOR') ||
+        upper.includes('PHARMA') ||
+        upper.includes('PVT LTD') ||
+        upper.includes('PRIVATE LIMITED')
       ) {
         continue;
       }
 
-      // Remove common medicine description words
-      candidate =
-        candidate
-          .replace(
-            /\b(TABLETS?|CAPSULES?|SYRUP|INJECTION)\b/gi,
-            ''
-          )
-          .replace(
-            /\b\d+\s*MG\b/gi,
-            ''
-          )
-          .replace(
-            /\b\d+\s*ML\b/gi,
-            ''
-          )
-          .replace(/\s+/g, ' ')
-          .trim();
-
+      // Prefer lines with medicine-like strength
       if (
-        candidate.length < 3
+        /\b\d{2,4}\s*(MG|MCG|G|ML)\b/i.test(
+          candidate
+        )
       ) {
-        continue;
+        medicineName =
+          candidate
+            .replace(
+              /\b(TABLETS?|CAPSULES?|SYRUP)\b/gi,
+              ''
+            )
+            .replace(/\s+/g, ' ')
+            .trim();
+
+        break;
       }
-
-      // Must contain letters
-      if (
-        !/[A-Za-z]{3,}/.test(candidate)
-      ) {
-        continue;
-      }
-
-      // Avoid random OCR fragments
-      if (
-        /^[A-Z]\s+[A-Z]$/i.test(candidate)
-      ) {
-        continue;
-      }
-
-      medicineName =
-        candidate;
-
-      break;
     }
   }
 
-  console.log(
-    '💊 MEDICINE NAME:',
-    medicineName
-  );
-
   // ===================================================
-  // BRAND / MANUFACTURER
+  // BRAND NAME
   // ===================================================
 
   let brandName = null;
 
+  /*
+   * IMPORTANT:
+   * Manufacturer is NOT Brand.
+   *
+   * Do not put:
+   * Alkem
+   * Micro Labs
+   * Sun Pharma
+   * Cipla
+   *
+   * into brandName just because they appear on pack.
+   */
+
   // ---------------------------------------------------
-  // Explicit manufacturer patterns
+  // Explicit brand/trade label
   // ---------------------------------------------------
 
-  const brandPatterns = [
-
-    /MANUFACTURED\s+BY\s*[:.\-]?\s*([A-Z][A-Z &.]{2,80})/i,
-
-    /MANUFACTURED\s+BY\s*[:.\-]?\s*([A-Z][A-Z &.]+?)(?:\s+UNIT|\s+PVT|\s+LTD|$)/i,
-
-    /MARKETED\s+BY\s*[:.\-]?\s*([A-Z][A-Z &.]{2,80})/i,
-
-    /MFG\s*BY\s*[:.\-]?\s*([A-Z][A-Z &.]{2,80})/i,
-
+  const brandLabelPatterns = [
+    /(?:BRAND\s*NAME|BRAND|TRADE\s*NAME)\s*[:.\-]?\s*([A-Z][A-Z0-9 .\-]{2,60})/i,
   ];
 
-  for (const pattern of brandPatterns) {
-
+  for (const pattern of brandLabelPatterns) {
     const match =
       oneLineText.match(pattern);
 
     if (match) {
-
-      let candidate =
-        match[1]
-          .trim()
-          .replace(/\s+/g, ' ');
-
-      candidate =
-        candidate.replace(
-          /\s+(UNIT|VILLAGE|DIST|DISTRICT|REGD|REGISTERED|MRP|BATCH|MFG|EXP).*$/i,
-          ''
+      const candidate =
+        cleanBrandCandidate(
+          match[1]
         );
 
       if (
-        candidate.length >= 3
+        isValidBrandCandidate(
+          candidate
+        )
       ) {
-
         brandName =
           toTitleCase(candidate);
-
         break;
       }
     }
   }
 
-  // ===================================================
-  // KNOWN BRAND / MANUFACTURER
-  // ===================================================
+  // ---------------------------------------------------
+  // Known commercial brands
+  // ---------------------------------------------------
 
   if (!brandName) {
-
     const knownBrands = [
-
       {
-        search: 'ALKEM',
-        name: 'Alkem',
+        regex: /\bMOXIKLAV\s*625\b/i,
+        name: 'Moxiklav 625',
       },
-
       {
-        search: 'MICRO LABS',
-        name: 'Micro Labs',
+        regex: /\bCROCIN(?:\s+\d{2,4})?\b/i,
+        name: 'Crocin',
       },
-
       {
-        search: 'SUN PHARMA',
-        name: 'Sun Pharma',
+        regex: /\bDOLO\s*[-]?\s*650\b/i,
+        name: 'Dolo 650',
       },
-
       {
-        search: 'CIPLA',
-        name: 'Cipla',
+        regex: /\bDOLO\s*[-]?\s*650\s*MG\b/i,
+        name: 'Dolo 650',
       },
-
       {
-        search: 'DR REDDY',
-        name: 'Dr Reddy',
+        regex: /\bMONTair\b/i,
+        name: 'Montair',
       },
-
       {
-        search: 'NOVACARE',
-        name: 'NovaCare Laboratories',
+        regex: /\bPANTOCID\b/i,
+        name: 'Pantocid',
       },
-
       {
-        search: 'NOVA CARE',
-        name: 'NovaCare Laboratories',
+        regex: /\bBRUFEN\b/i,
+        name: 'Brufen',
       },
-
+      {
+        regex: /\bOMEZ\b/i,
+        name: 'Omez',
+      },
+      {
+        regex: /\bGLYCOMET\b/i,
+        name: 'Glycomet',
+      },
+      {
+        regex: /\bZYRTEC\b/i,
+        name: 'Zyrtec',
+      },
+      {
+        regex: /\bAZITHRAL\b/i,
+        name: 'Azithral',
+      },
+      {
+        regex: /\bMONTELUKAST\b/i,
+        name: 'Montelukast',
+      },
     ];
 
     for (const brand of knownBrands) {
-
       if (
-        oneLineText.includes(
-          brand.search
-        )
+        brand.regex.test(oneLineText)
       ) {
-
-        brandName =
-          brand.name;
-
+        brandName = brand.name;
         break;
       }
     }
   }
 
-  console.log(
-    '🏭 BRAND:',
-    brandName
-  );
+  // ---------------------------------------------------
+  // If medicine itself is a commercial brand,
+  // use medicine name as brand.
+  // ---------------------------------------------------
+
+  if (
+    !brandName &&
+    medicineName
+  ) {
+    const commercialBrandPatterns = [
+      /^Moxiklav/i,
+      /^Crocin/i,
+      /^Dolo/i,
+      /^Paracure/i,
+      /^Montair/i,
+      /^Pantocid/i,
+      /^Brufen/i,
+      /^Omez/i,
+      /^Glycomet/i,
+      /^Zyrtec/i,
+      /^Azithral/i,
+    ];
+
+    if (
+      commercialBrandPatterns.some(
+        (pattern) =>
+          pattern.test(medicineName)
+      )
+    ) {
+      brandName = medicineName;
+    }
+  }
 
   // ===================================================
   // CATEGORY
@@ -1134,11 +842,6 @@ export const parseMedicineDetails = (text) => {
       oneLineText
     );
 
-  console.log(
-    '📂 CATEGORY:',
-    category
-  );
-
   // ===================================================
   // MRP
   // ===================================================
@@ -1146,38 +849,26 @@ export const parseMedicineDetails = (text) => {
   let mrp = null;
 
   const mrpPatterns = [
-
-    /MRP\s*₹?\s*[:.\-]?\s*(\d+(?:\.\d{1,2})?)/i,
-
     /MRP\s*[:.\-]?\s*₹?\s*(\d+(?:\.\d{1,2})?)/i,
-
+    /MAX(?:IMUM)?\s*RETAIL\s*PRICE\s*[:.\-]?\s*₹?\s*(\d+(?:\.\d{1,2})?)/i,
   ];
 
   for (const pattern of mrpPatterns) {
-
     const match =
       oneLineText.match(pattern);
 
     if (match) {
-
       mrp =
         parseFloat(match[1]);
-
       break;
     }
   }
-
-  console.log(
-    '💰 MRP:',
-    mrp
-  );
 
   // ===================================================
   // FINAL RESULT
   // ===================================================
 
   const details = {
-
     medicineName:
       medicineName || null,
 
@@ -1196,20 +887,16 @@ export const parseMedicineDetails = (text) => {
     expiryDate:
       expiryDate || null,
 
-    mrp:
-      mrp,
-
+    mrp,
   };
 
   console.log(
     '================================'
   );
-
   console.log(
-    '✅ FINAL PARSED DETAILS:',
-    details
+    '✅ FINAL OCR DETAILS'
   );
-
+  console.log(details);
   console.log(
     '================================'
   );
@@ -1218,30 +905,64 @@ export const parseMedicineDetails = (text) => {
 };
 
 // =====================================================
-// CLEAN BATCH
+// DATE NORMALIZER
 // =====================================================
 
-const cleanBatchCandidate = (value) => {
+const normalizeDate = (
+  month,
+  year
+) => {
+  const m =
+    parseInt(month, 10);
 
-  if (!value) {
+  const y =
+    parseInt(year, 10);
+
+  if (
+    Number.isNaN(m) ||
+    Number.isNaN(y)
+  ) {
     return null;
   }
 
+  if (
+    m < 1 ||
+    m > 12 ||
+    y < 2000 ||
+    y > 2100
+  ) {
+    return null;
+  }
+
+  return `${String(m).padStart(
+    2,
+    '0'
+  )}/${y}`;
+};
+
+// =====================================================
+// BATCH CLEAN
+// =====================================================
+
+const cleanBatchCandidate = (
+  value
+) => {
+  if (!value) return null;
+
   return String(value)
-    .replace(/[^A-Z0-9\/-]/gi, '')
+    .replace(/[^A-Z0-9\/\-]/gi, '')
     .trim()
     .toUpperCase();
 };
 
 // =====================================================
-// VALID BATCH
+// BATCH VALIDATION
 // =====================================================
 
-const isValidBatchCandidate = (value) => {
-
-  if (!value) {
-    return false;
-  }
+const isValidBatchCandidate = (
+  value
+) => {
+  if (!value) return false;
 
   const candidate =
     String(value)
@@ -1255,22 +976,17 @@ const isValidBatchCandidate = (value) => {
     return false;
   }
 
-  // Must contain letter
-  if (
-    !/[A-Z]/.test(candidate)
-  ) {
+  // Must contain both letter and number
+  if (!/[A-Z]/.test(candidate)) {
     return false;
   }
 
-  // Must contain number
-  if (
-    !/\d/.test(candidate)
-  ) {
+  if (!/\d/.test(candidate)) {
     return false;
   }
 
-  const invalid = [
-
+  // Never accept obvious medicine/label text
+  const invalidWords = [
     'MFG',
     'MFD',
     'EXP',
@@ -1279,18 +995,24 @@ const isValidBatchCandidate = (value) => {
     'TABLET',
     'TABLETS',
     'CAPSULE',
+    'CAPSULES',
     'ALKEM',
-    'AMOXICILLIN',
     'MOXIKLAV',
-    'PARACURE',
-    'CEFIXIME',
-    'CEFPODOXIME',
-    'NOVACARE',
-
+    'AMOXICILLIN',
+    'PARACETAMOL',
+    'IBUPROFEN',
+    'PANTOPRAZOLE',
+    'SCHEDULE',
+    'PRESCRIPTION',
+    'CAUTION',
   ];
 
   if (
-    invalid.includes(candidate)
+    invalidWords.some(
+      (word) =>
+        candidate === word ||
+        candidate.includes(word)
+    )
   ) {
     return false;
   }
@@ -1299,14 +1021,75 @@ const isValidBatchCandidate = (value) => {
 };
 
 // =====================================================
+// BRAND CLEAN
+// =====================================================
+
+const cleanBrandCandidate = (
+  value
+) => {
+  if (!value) return null;
+
+  return String(value)
+    .replace(
+      /(?:SCHEDULE|PRESCRIPTION|CAUTION).*/i,
+      ''
+    )
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
+// =====================================================
+// BRAND VALIDATION
+// =====================================================
+
+const isValidBrandCandidate = (
+  value
+) => {
+  if (!value) return false;
+
+  const candidate =
+    value.trim();
+
+  if (
+    candidate.length < 3 ||
+    candidate.length > 60
+  ) {
+    return false;
+  }
+
+  const invalid = [
+    'SCHEDULE',
+    'PRESCRIPTION',
+    'CAUTION',
+    'MANUFACTURED',
+    'MARKETED',
+    'BATCH',
+    'EXPIRY',
+    'MFG',
+    'MFD',
+    'MRP',
+    'TABLET',
+    'TABLETS',
+    'CAPSULE',
+  ];
+
+  const upper =
+    candidate.toUpperCase();
+
+  return !invalid.some(
+    (word) =>
+      upper.includes(word)
+  );
+};
+
+// =====================================================
 // TITLE CASE
 // =====================================================
 
-const toTitleCase = (value) => {
-
-  if (!value) {
-    return value;
-  }
+const toTitleCase = (
+  value
+) => {
+  if (!value) return value;
 
   return String(value)
     .toLowerCase()
@@ -1325,37 +1108,26 @@ const detectCategory = (
   medicineName,
   text
 ) => {
-
   const value =
-    `${medicineName || ''} ${text || ''}`
-      .toUpperCase();
+    `${medicineName || ''} ${
+      text || ''
+    }`.toUpperCase();
 
-  // ===================================================
-  // PAINKILLER
-  // ===================================================
-
+  // Painkiller
   if (
-
     value.includes('PARACETAMOL') ||
     value.includes('PARACURE') ||
     value.includes('IBUPROFEN') ||
     value.includes('DICLOFENAC') ||
     value.includes('DOLO') ||
     value.includes('CROCIN') ||
-    value.includes('PAIN RELIEVER') ||
-    value.includes('FEVER REDUCER')
-
+    value.includes('PAIN RELIEVER')
   ) {
-
     return 'Painkiller';
   }
 
-  // ===================================================
-  // ANTIBIOTIC
-  // ===================================================
-
+  // Antibiotic
   if (
-
     value.includes('AMOXICILLIN') ||
     value.includes('AZITHROMYCIN') ||
     value.includes('DOXYCYCLINE') ||
@@ -1366,64 +1138,81 @@ const detectCategory = (
     value.includes('CEFPOD') ||
     value.includes('MOXIKLAV') ||
     value.includes('CLAVULANATE')
-
   ) {
-
     return 'Antibiotic';
   }
 
-  // ===================================================
-  // VITAMIN
-  // ===================================================
-
+  // Antihistamine / allergy
   if (
+    value.includes('CETIRIZINE') ||
+    value.includes('LEVOCETIRIZINE') ||
+    value.includes('LORATADINE') ||
+    value.includes('FEXOFENADINE') ||
+    value.includes('MONTELUKAST') ||
+    value.includes('MONTair'.toUpperCase())
+  ) {
+    return 'Antihistamine';
+  }
 
+  // Gastric / acid reducer
+  if (
+    value.includes('PANTOPRAZOLE') ||
+    value.includes('OMEPRAZOLE') ||
+    value.includes('RABEPRAZOLE') ||
+    value.includes('ESOMEPRAZOLE') ||
+    value.includes('ANTACID')
+  ) {
+    return 'Gastric / Acid Reducer';
+  }
+
+  // Diabetes
+  if (
+    value.includes('METFORMIN') ||
+    value.includes('GLIMEPIRIDE') ||
+    value.includes('GLIPIZIDE') ||
+    value.includes('DIABETES')
+  ) {
+    return 'Diabetes';
+  }
+
+  // Vitamins
+  if (
     value.includes('VITAMIN') ||
     value.includes('B12') ||
     value.includes('B-COMPLEX') ||
     value.includes('CALCIUM') ||
     value.includes('FOLIC ACID')
-
   ) {
-
-    return 'Vitamin';
+    return 'Vitamins & Supplements';
   }
 
-  // ===================================================
-  // ANTACID
-  // ===================================================
-
+  // Cough
   if (
-
-    value.includes('PANTOPRAZOLE') ||
-    value.includes('OMEPRAZOLE') ||
-    value.includes('RABEPRAZOLE') ||
-    value.includes('ANTACID')
-
-  ) {
-
-    return 'Antacid';
-  }
-
-  // ===================================================
-  // COUGH SYRUP
-  // ===================================================
-
-  if (
-
     value.includes('COUGH') ||
     value.includes('DEXTROMETHORPHAN') ||
     value.includes('GUAIFENESIN') ||
     value.includes('AMBROXOL') ||
     value.includes('SYRUP')
-
   ) {
-
-    return 'Cough Syrup';
+    return 'Cold & Cough';
   }
 
   return 'Other';
 };
+
+// =====================================================
+// EMPTY DETAILS
+// =====================================================
+
+const emptyDetails = () => ({
+  medicineName: null,
+  brandName: null,
+  category: null,
+  batchNumber: null,
+  mfgDate: null,
+  expiryDate: null,
+  mrp: null,
+});
 
 // =====================================================
 // EXPIRY ONLY
@@ -1432,14 +1221,12 @@ const detectCategory = (
 export const extractExpiryDate = async (
   imageUri
 ) => {
-
   const result =
     await extractMedicineDetails(
       imageUri
     );
 
   return {
-
     rawText:
       result.rawText,
 
@@ -1448,7 +1235,6 @@ export const extractExpiryDate = async (
 
     success:
       !!result.expiryDate,
-
   };
 };
 
@@ -1459,7 +1245,6 @@ export const extractExpiryDate = async (
 export const parseExpiryDate = (
   text
 ) => {
-
   const details =
     parseMedicineDetails(text);
 

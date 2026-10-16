@@ -1,102 +1,136 @@
 const express = require('express');
 const multer = require('multer');
 const path = require('path');
-const fs = require('fs');
+const crypto = require('crypto');
 
 const router = express.Router();
 
-const Prescription = require('../models/Prescription');
-const Pharmacy = require('../models/Pharmacy');
-const Cart = require('../models/Cart');
+const Prescription =
+  require('../models/Prescription');
 
-const auth = require('../middleware/auth');
-const { pharmacyStaff } = require('../middleware/rolePermissions');
+const Pharmacy =
+  require('../models/Pharmacy');
 
-// =====================================================
-// UPLOAD DIRECTORY
-// =====================================================
+const Cart =
+  require('../models/Cart');
 
-const uploadDir = path.join(
-  __dirname,
-  '../uploads/prescriptions'
-);
+const auth =
+  require('../middleware/auth');
 
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, {
-    recursive: true,
-  });
-}
+const {
+  pharmacyStaff,
+} = require('../middleware/rolePermissions');
 
 // =====================================================
-// MULTER STORAGE
+// MULTER - MEMORY STORAGE
+// =====================================================
+// IMPORTANT:
+// We are NOT saving prescriptions inside Render's
+// local filesystem anymore.
+//
+// File is kept in memory and then stored in MongoDB.
 // =====================================================
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadDir);
-  },
-
-  filename: (req, file, cb) => {
-    const extension = path
-      .extname(file.originalname || '')
-      .toLowerCase();
-
-    const uniqueName =
-      `prescription-${Date.now()}-${Math.round(
-        Math.random() * 1e9
-      )}${extension}`;
-
-    cb(null, uniqueName);
-  },
-});
+const storage =
+  multer.memoryStorage();
 
 // =====================================================
 // FILE FILTER
 // =====================================================
 
-const fileFilter = (req, file, cb) => {
-  const mimeType = String(file.mimetype || '').toLowerCase();
-  const originalName = String(file.originalname || '').toLowerCase();
+const fileFilter = (
+  req,
+  file,
+  cb
+) => {
+  const mimeType =
+    String(
+      file.mimetype || ''
+    ).toLowerCase();
 
-  const extension = path.extname(originalName);
+  const originalName =
+    String(
+      file.originalname || ''
+    ).toLowerCase();
 
-  console.log('========== PRESCRIPTION FILE ==========');
-  console.log('Original Name:', file.originalname);
-  console.log('MIME Type:', file.mimetype);
-  console.log('Extension:', extension);
-  console.log('=======================================');
+  const extension =
+    path.extname(
+      originalName
+    );
 
-  // -------------------------------------------------
+  console.log(
+    '========== PRESCRIPTION FILE =========='
+  );
+
+  console.log(
+    'Original Name:',
+    file.originalname
+  );
+
+  console.log(
+    'MIME Type:',
+    file.mimetype
+  );
+
+  console.log(
+    'Extension:',
+    extension
+  );
+
+  console.log(
+    '======================================='
+  );
+
+  // ---------------------------------------------------
   // PDF
-  // -------------------------------------------------
+  // ---------------------------------------------------
+
   if (
-    mimeType === 'application/pdf' ||
+    mimeType ===
+      'application/pdf' ||
     extension === '.pdf'
   ) {
-    return cb(null, true);
+    return cb(
+      null,
+      true
+    );
   }
 
-  // -------------------------------------------------
+  // ---------------------------------------------------
   // Normal image MIME types
-  // -------------------------------------------------
-  if (mimeType.startsWith('image/')) {
-    return cb(null, true);
+  // ---------------------------------------------------
+
+  if (
+    mimeType.startsWith(
+      'image/'
+    )
+  ) {
+    return cb(
+      null,
+      true
+    );
   }
 
-  // -------------------------------------------------
+  // ---------------------------------------------------
   // Android / Expo sometimes sends:
   // application/octet-stream
-  // -------------------------------------------------
+  // ---------------------------------------------------
+
   if (
-    mimeType === 'application/octet-stream'
+    mimeType ===
+    'application/octet-stream'
   ) {
-    return cb(null, true);
+    return cb(
+      null,
+      true
+    );
   }
 
-  // -------------------------------------------------
+  // ---------------------------------------------------
   // Some mobile clients may not provide MIME type
-  // but provide a valid image extension
-  // -------------------------------------------------
+  // but provide a valid extension
+  // ---------------------------------------------------
+
   const allowedExtensions = [
     '.jpg',
     '.jpeg',
@@ -108,32 +142,43 @@ const fileFilter = (req, file, cb) => {
   ];
 
   if (
-    allowedExtensions.includes(extension)
+    allowedExtensions.includes(
+      extension
+    )
   ) {
-    return cb(null, true);
+    return cb(
+      null,
+      true
+    );
   }
 
-  // -------------------------------------------------
-  // Reject only completely unknown file types
-  // -------------------------------------------------
+  // ---------------------------------------------------
+  // Reject unknown file types
+  // ---------------------------------------------------
+
   return cb(
     new Error(
       'Only image files and PDF files are allowed'
     )
   );
 };
+
 // =====================================================
 // MULTER CONFIGURATION
 // =====================================================
 
-const upload = multer({
-  storage,
-  fileFilter,
+const upload =
+  multer({
+    storage,
 
-  limits: {
-    fileSize: 5 * 1024 * 1024,
-  },
-});
+    fileFilter,
+
+    limits: {
+      // Maximum 5 MB
+      fileSize:
+        5 * 1024 * 1024,
+    },
+  });
 
 // =====================================================
 // UPLOAD PRESCRIPTION
@@ -142,12 +187,15 @@ const upload = multer({
 router.post(
   '/upload',
   auth,
-  upload.single('prescription'),
+  upload.single(
+    'prescription'
+  ),
+
   async (req, res) => {
     try {
-      // ---------------------------------------------
+      // -------------------------------------------------
       // Check uploaded file
-      // ---------------------------------------------
+      // -------------------------------------------------
 
       if (!req.file) {
         return res.status(400).json({
@@ -156,9 +204,9 @@ router.post(
         });
       }
 
-      // ---------------------------------------------
+      // -------------------------------------------------
       // Get customer ID
-      // ---------------------------------------------
+      // -------------------------------------------------
 
       const customerId =
         req.user?.id ||
@@ -171,21 +219,22 @@ router.post(
         });
       }
 
-      // ---------------------------------------------
+      // -------------------------------------------------
       // Get pharmacy ID
-      // ---------------------------------------------
+      // -------------------------------------------------
 
       const pharmacyId =
         req.body?.pharmacyId ||
         null;
 
-      // ---------------------------------------------
+      // -------------------------------------------------
       // Get current customer cart
-      // ---------------------------------------------
+      // -------------------------------------------------
 
       const cart =
         await Cart.findOne({
-          customer: customerId,
+          customer:
+            customerId,
         });
 
       if (
@@ -199,9 +248,9 @@ router.post(
         });
       }
 
-      // ---------------------------------------------
+      // -------------------------------------------------
       // Get medicine IDs from cart
-      // ---------------------------------------------
+      // -------------------------------------------------
 
       const medicineIds =
         cart.items
@@ -211,45 +260,83 @@ router.post(
           )
           .filter(Boolean);
 
-      if (!medicineIds.length) {
+      if (
+        !medicineIds.length
+      ) {
         return res.status(400).json({
           message:
             'No medicines found in the current cart.',
         });
       }
 
-      // ---------------------------------------------
+      // -------------------------------------------------
       // Determine file type
-      // ---------------------------------------------
+      // -------------------------------------------------
 
       const uploadedExtension =
         path
           .extname(
-            req.file.originalname || ''
+            req.file.originalname ||
+              ''
           )
           .toLowerCase();
 
-      const fileType =
+      const isPdf =
         req.file.mimetype ===
           'application/pdf' ||
-        uploadedExtension === '.pdf'
+        uploadedExtension ===
+          '.pdf';
+
+      const fileType =
+        isPdf
           ? 'pdf'
           : 'image';
 
-      // ---------------------------------------------
-      // File URL
-      // ---------------------------------------------
+      // -------------------------------------------------
+      // Generate secure file access token
+      // -------------------------------------------------
+
+      const fileAccessToken =
+        crypto
+          .randomBytes(32)
+          .toString('hex');
+
+      // -------------------------------------------------
+      // Generate MongoDB ID before creating document
+      // -------------------------------------------------
+
+      const prescriptionId =
+        new require('mongoose')
+          .Types.ObjectId();
+
+      // -------------------------------------------------
+      // Permanent file URL
+      // -------------------------------------------------
+      //
+      // Example:
+      //
+      // /api/prescriptions/
+      // 68abc123.../
+      // file/
+      // 9f82....
+      //
+      // This does NOT depend on Render /uploads folder.
+      // -------------------------------------------------
 
       const fileUrl =
-        `/uploads/prescriptions/${req.file.filename}`;
+        `/api/prescriptions/${prescriptionId}/file/${fileAccessToken}`;
 
-      // ---------------------------------------------
+      // -------------------------------------------------
       // Create prescription
-      // ---------------------------------------------
+      // -------------------------------------------------
 
       const prescription =
         await Prescription.create({
-          customer: customerId,
+          _id:
+            prescriptionId,
+
+          customer:
+            customerId,
 
           pharmacy:
             pharmacyId ||
@@ -258,10 +345,15 @@ router.post(
 
           // Link prescription to
           // medicines in current cart
-          medicines: medicineIds,
+          medicines:
+            medicineIds,
+
+          // ------------------------------------------------
+          // File information
+          // ------------------------------------------------
 
           fileName:
-            req.file.filename,
+            req.file.originalname,
 
           originalName:
             req.file.originalname,
@@ -273,19 +365,47 @@ router.post(
           mimeType:
             req.file.mimetype,
 
-          status: 'pending',
+          // ------------------------------------------------
+          // ACTUAL FILE
+          // ------------------------------------------------
+
+          fileData:
+            req.file.buffer,
+
+          fileAccessToken,
+
+          // ------------------------------------------------
+          // Status
+          // ------------------------------------------------
+
+          status:
+            'pending',
         });
 
-      // ---------------------------------------------
+      // -------------------------------------------------
+      // Prepare safe response
+      // -------------------------------------------------
+      // Never send fileData/fileAccessToken to frontend.
+      // -------------------------------------------------
+
+      const responsePrescription =
+        prescription.toObject();
+
+      delete responsePrescription.fileData;
+      delete responsePrescription.fileAccessToken;
+
+      // -------------------------------------------------
       // Success response
-      // ---------------------------------------------
+      // -------------------------------------------------
 
       return res.status(201).json({
         message:
           'Prescription uploaded successfully',
 
-        prescription,
+        prescription:
+          responsePrescription,
       });
+
     } catch (error) {
       console.error(
         'Prescription upload error:',
@@ -296,8 +416,125 @@ router.post(
         message:
           'Failed to upload prescription',
 
-        error: error.message,
+        error:
+          error.message,
       });
+    }
+  }
+);
+
+// =====================================================
+// VIEW / OPEN PRESCRIPTION FILE
+// =====================================================
+//
+// This is the MAIN FIX.
+//
+// Mobile pharmacist app opens:
+//
+// /api/prescriptions/:id/file/:accessToken
+//
+// Backend reads fileData from MongoDB
+// and sends the actual image/PDF.
+// =====================================================
+
+router.get(
+  '/:id/file/:accessToken',
+
+  async (req, res) => {
+    try {
+      const {
+        id,
+        accessToken,
+      } = req.params;
+
+      // -------------------------------------------------
+      // Find prescription
+      // -------------------------------------------------
+
+      const prescription =
+        await Prescription.findOne({
+          _id: id,
+
+          fileAccessToken:
+            accessToken,
+        }).select(
+          '+fileData +fileAccessToken'
+        );
+
+      if (!prescription) {
+        return res.status(404).send(
+          'Prescription file not found'
+        );
+      }
+
+      // -------------------------------------------------
+      // Check actual file data
+      // -------------------------------------------------
+
+      if (
+        !prescription.fileData ||
+        !prescription.fileData.length
+      ) {
+        return res.status(404).send(
+          'Prescription file data is unavailable'
+        );
+      }
+
+      // -------------------------------------------------
+      // Determine MIME type
+      // -------------------------------------------------
+
+      let mimeType =
+        prescription.mimeType;
+
+      if (!mimeType) {
+        mimeType =
+          prescription.fileType ===
+          'pdf'
+            ? 'application/pdf'
+            : 'image/jpeg';
+      }
+
+      // -------------------------------------------------
+      // Response headers
+      // -------------------------------------------------
+
+      res.setHeader(
+        'Content-Type',
+        mimeType
+      );
+
+      res.setHeader(
+        'Content-Disposition',
+        `inline; filename="${encodeURIComponent(
+          prescription.originalName ||
+            prescription.fileName ||
+            'prescription'
+        )}"`
+      );
+
+      res.setHeader(
+        'Cache-Control',
+        'private, max-age=300'
+      );
+
+      // -------------------------------------------------
+      // Send actual file
+      // -------------------------------------------------
+
+      return res.send(
+        prescription.fileData
+      );
+
+    } catch (error) {
+      console.error(
+        'View prescription error:',
+        error
+      );
+
+      return res.status(500).send(
+        'Unable to open prescription'
+      );
     }
   }
 );
@@ -309,20 +546,29 @@ router.post(
 router.get(
   '/my',
   auth,
+
   async (req, res) => {
     try {
       const prescriptions =
         await Prescription.find({
-          customer: req.user.id,
+          customer:
+            req.user.id,
         })
+          // Do not return actual binary file
+          .select(
+            '-fileData -fileAccessToken'
+          )
+
           .populate(
             'pharmacy',
             'name phone address city'
           )
+
           .populate(
             'medicines',
             'name brand'
           )
+
           .sort({
             createdAt: -1,
           });
@@ -333,6 +579,7 @@ router.get(
 
         prescriptions,
       });
+
     } catch (error) {
       console.error(
         'Get prescriptions error:',
@@ -343,7 +590,8 @@ router.get(
         message:
           'Failed to fetch prescriptions',
 
-        error: error.message,
+        error:
+          error.message,
       });
     }
   }
@@ -357,16 +605,20 @@ router.get(
   '/pharmacy',
   auth,
   pharmacyStaff,
+
   async (req, res) => {
     try {
-      // ---------------------------------------------
+      // -------------------------------------------------
       // Find pharmacy
-      // ---------------------------------------------
+      // -------------------------------------------------
 
       const pharmacy =
         await Pharmacy.findOne({
-          owner: req.user.id,
-          isActive: true,
+          owner:
+            req.user.id,
+
+          isActive:
+            true,
         });
 
       if (!pharmacy) {
@@ -376,27 +628,37 @@ router.get(
         });
       }
 
-      // ---------------------------------------------
+      // -------------------------------------------------
       // Get pharmacy prescriptions
-      // ---------------------------------------------
+      // -------------------------------------------------
 
       const prescriptions =
         await Prescription.find({
           pharmacy:
             pharmacy._id,
         })
+
+          // IMPORTANT:
+          // Do not send binary file to dashboard
+          .select(
+            '-fileData -fileAccessToken'
+          )
+
           .populate(
             'customer',
             'name email'
           )
+
           .populate(
             'order',
             'orderNumber orderStatus'
           )
+
           .populate(
             'medicines',
             'name brand'
           )
+
           .sort({
             createdAt: -1,
           });
@@ -407,6 +669,7 @@ router.get(
 
         prescriptions,
       });
+
     } catch (error) {
       console.error(
         'Get pharmacy prescriptions error:',
@@ -417,7 +680,8 @@ router.get(
         message:
           'Failed to fetch pharmacy prescriptions',
 
-        error: error.message,
+        error:
+          error.message,
       });
     }
   }
@@ -431,6 +695,7 @@ router.put(
   '/:id/verify',
   auth,
   pharmacyStaff,
+
   async (req, res) => {
     try {
       const {
@@ -438,9 +703,9 @@ router.put(
         rejectionReason = '',
       } = req.body;
 
-      // ---------------------------------------------
+      // -------------------------------------------------
       // Validate status
-      // ---------------------------------------------
+      // -------------------------------------------------
 
       if (
         ![
@@ -454,14 +719,17 @@ router.put(
         });
       }
 
-      // ---------------------------------------------
+      // -------------------------------------------------
       // Find pharmacy
-      // ---------------------------------------------
+      // -------------------------------------------------
 
       const pharmacy =
         await Pharmacy.findOne({
-          owner: req.user.id,
-          isActive: true,
+          owner:
+            req.user.id,
+
+          isActive:
+            true,
         });
 
       if (!pharmacy) {
@@ -471,13 +739,14 @@ router.put(
         });
       }
 
-      // ---------------------------------------------
+      // -------------------------------------------------
       // Find prescription
-      // ---------------------------------------------
+      // -------------------------------------------------
 
       const prescription =
         await Prescription.findOne({
-          _id: req.params.id,
+          _id:
+            req.params.id,
 
           pharmacy:
             pharmacy._id,
@@ -490,12 +759,13 @@ router.put(
         });
       }
 
-      // ---------------------------------------------
+      // -------------------------------------------------
       // Rejection reason
-      // ---------------------------------------------
+      // -------------------------------------------------
 
       if (
-        status === 'rejected' &&
+        status ===
+          'rejected' &&
         !String(
           rejectionReason
         ).trim()
@@ -506,9 +776,9 @@ router.put(
         });
       }
 
-      // ---------------------------------------------
+      // -------------------------------------------------
       // Update prescription
-      // ---------------------------------------------
+      // -------------------------------------------------
 
       prescription.status =
         status;
@@ -528,9 +798,19 @@ router.put(
 
       await prescription.save();
 
-      // ---------------------------------------------
+      // -------------------------------------------------
+      // Safe response
+      // -------------------------------------------------
+
+      const responsePrescription =
+        prescription.toObject();
+
+      delete responsePrescription.fileData;
+      delete responsePrescription.fileAccessToken;
+
+      // -------------------------------------------------
       // Response
-      // ---------------------------------------------
+      // -------------------------------------------------
 
       return res.json({
         message:
@@ -538,8 +818,10 @@ router.put(
             ? 'Prescription approved successfully'
             : 'Prescription rejected successfully',
 
-        prescription,
+        prescription:
+          responsePrescription,
       });
+
     } catch (error) {
       console.error(
         'Verify prescription error:',
@@ -550,7 +832,8 @@ router.put(
         message:
           'Failed to verify prescription',
 
-        error: error.message,
+        error:
+          error.message,
       });
     }
   }
@@ -560,4 +843,5 @@ router.put(
 // EXPORT ROUTER
 // =====================================================
 
-module.exports = router;
+module.exports =
+  router;

@@ -2,6 +2,9 @@ const mongoose = require('mongoose');
 
 const prescriptionSchema = new mongoose.Schema(
   {
+    // =====================================================
+    // CUSTOMER
+    // =====================================================
     customer: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
@@ -9,6 +12,9 @@ const prescriptionSchema = new mongoose.Schema(
       index: true,
     },
 
+    // =====================================================
+    // PHARMACY
+    // =====================================================
     pharmacy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Pharmacy',
@@ -16,6 +22,9 @@ const prescriptionSchema = new mongoose.Schema(
       index: true,
     },
 
+    // =====================================================
+    // ORDER
+    // =====================================================
     order: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'CustomerOrder',
@@ -23,7 +32,9 @@ const prescriptionSchema = new mongoose.Schema(
       index: true,
     },
 
-    // Medicines for which this prescription was uploaded
+    // =====================================================
+    // MEDICINES
+    // =====================================================
     medicines: [
       {
         type: mongoose.Schema.Types.ObjectId,
@@ -31,6 +42,9 @@ const prescriptionSchema = new mongoose.Schema(
       },
     ],
 
+    // =====================================================
+    // FILE INFORMATION
+    // =====================================================
     fileName: {
       type: String,
       required: true,
@@ -57,18 +71,49 @@ const prescriptionSchema = new mongoose.Schema(
       default: '',
     },
 
+    // =====================================================
+    // ACTUAL FILE DATA
+    // Stored inside MongoDB
+    // =====================================================
+    fileData: {
+      type: Buffer,
+      select: false,
+    },
+
+    // =====================================================
+    // SECURE FILE ACCESS TOKEN
+    // =====================================================
+    fileAccessToken: {
+      type: String,
+      select: false,
+      index: true,
+    },
+
+    // =====================================================
+    // PRESCRIPTION STATUS
+    // =====================================================
     status: {
       type: String,
-      enum: ['pending', 'approved', 'rejected'],
+      enum: [
+        'pending',
+        'approved',
+        'rejected',
+      ],
       default: 'pending',
       index: true,
     },
 
+    // =====================================================
+    // REJECTION
+    // =====================================================
     rejectionReason: {
       type: String,
       default: '',
     },
 
+    // =====================================================
+    // VERIFICATION
+    // =====================================================
     verifiedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
@@ -85,4 +130,8 @@ const prescriptionSchema = new mongoose.Schema(
   }
 );
 
-module.exports = mongoose.model('Prescription', prescriptionSchema);
+module.exports =
+  mongoose.model(
+    'Prescription',
+    prescriptionSchema
+  );

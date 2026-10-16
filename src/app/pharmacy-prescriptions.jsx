@@ -1,77 +1,100 @@
-import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
+import {
+  useCallback,
+  useState,
+} from 'react';
+
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
   Linking,
-  Modal,
   RefreshControl,
+  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
 
 import {
+  useFocusEffect,
+} from '@react-navigation/native';
+
+import {
+  approvePrescription,
   getPharmacyPrescriptions,
-  verifyPrescription,
-} from '../services/api';
+  rejectPrescription,
+} from '../services/prescriptionService';
 
-const BASE_URL = 'https://medtracker-1.onrender.com';
+// =====================================================
+// PRODUCTION BACKEND
+// =====================================================
 
-const COLORS = {
-  background: '#F6F8F7',
-  white: '#FFFFFF',
-  green: '#176B52',
-  greenDark: '#0F4F3D',
-  greenLight: '#E8F3EF',
-  text: '#17221E',
-  textSecondary: '#66736E',
-  border: '#E1E7E4',
-  muted: '#F0F3F2',
-  red: '#C62828',
-  redLight: '#FDECEC',
-  orange: '#B86B00',
-  orangeLight: '#FFF4DF',
-  blue: '#2563EB',
-  blueLight: '#EAF1FF',
-};
+const BASE_URL =
+  'https://medtracker-1.onrender.com';
+
+// =====================================================
+// SCREEN
+// =====================================================
 
 export default function PharmacyPrescriptions() {
-  const router = useRouter();
+  const [
+    prescriptions,
+    setPrescriptions,
+  ] = useState([]);
 
-  const [prescriptions, setPrescriptions] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const [
+    loading,
+    setLoading,
+  ] = useState(true);
 
-  const [rejectModalVisible, setRejectModalVisible] = useState(false);
-  const [selectedPrescription, setSelectedPrescription] = useState(null);
-  const [rejectionReason, setRejectionReason] = useState('');
-  const [actionLoading, setActionLoading] = useState(false);
+  const [
+    refreshing,
+    setRefreshing,
+  ] = useState(false);
 
-  const loadPrescriptions = async (showLoader = true) => {
+  const [
+    actionLoading,
+    setActionLoading,
+  ] = useState(false);
+
+  // ===================================================
+  // LOAD PRESCRIPTIONS
+  // ===================================================
+
+  const loadPrescriptions = async (
+    showLoader = true
+  ) => {
     try {
       if (showLoader) {
         setLoading(true);
       }
 
-      const result = await getPharmacyPrescriptions();
+      const result =
+        await getPharmacyPrescriptions();
 
-      const data = Array.isArray(result)
-        ? result
-        : Array.isArray(result?.prescriptions)
+      const data =
+        Array.isArray(result)
+          ? result
+          : Array.isArray(
+              result?.prescriptions
+            )
           ? result.prescriptions
           : [];
 
       setPrescriptions(data);
+
     } catch (error) {
-      console.log('Load pharmacy prescriptions error:', error);
+      console.log(
+        'Load pharmacy prescriptions error:',
+        error
+      );
 
       Alert.alert(
         'Unable to load prescriptions',
-        error?.message || 'Please try again.'
+        error?.message ||
+          'Please try again.'
       );
     } finally {
       setLoading(false);
@@ -79,65 +102,131 @@ export default function PharmacyPrescriptions() {
     }
   };
 
+  // ===================================================
+  // LOAD WHEN SCREEN GETS FOCUS
+  // ===================================================
+
   useFocusEffect(
     useCallback(() => {
       loadPrescriptions();
     }, [])
   );
 
+  // ===================================================
+  // REFRESH
+  // ===================================================
+
   const onRefresh = () => {
     setRefreshing(true);
     loadPrescriptions(false);
   };
 
-  const getStatusStyle = (status) => {
+  // ===================================================
+  // STATUS STYLE
+  // ===================================================
+
+  const getStatusStyle = (
+    status
+  ) => {
     switch (status) {
       case 'approved':
         return {
-          badge: styles.approvedBadge,
-          text: styles.approvedText,
+          badge:
+            styles.approvedBadge,
+          text:
+            styles.approvedText,
           label: 'APPROVED',
         };
 
       case 'rejected':
         return {
-          badge: styles.rejectedBadge,
-          text: styles.rejectedText,
+          badge:
+            styles.rejectedBadge,
+          text:
+            styles.rejectedText,
           label: 'REJECTED',
         };
 
       default:
         return {
-          badge: styles.pendingBadge,
-          text: styles.pendingText,
+          badge:
+            styles.pendingBadge,
+          text:
+            styles.pendingText,
           label: 'PENDING',
         };
     }
   };
 
-  const getFileUrl = (fileUrl) => {
-    if (!fileUrl) return null;
+  // ===================================================
+  // GET PRESCRIPTION FILE URL
+  // ===================================================
 
-    if (
-      fileUrl.startsWith('http://') ||
-      fileUrl.startsWith('https://')
-    ) {
-      return fileUrl;
+  const getFileUrl = (
+    fileUrl
+  ) => {
+    if (!fileUrl) {
+      return null;
     }
 
-    return `${BASE_URL}${fileUrl}`;
+    const cleanUrl =
+      String(fileUrl).trim();
+
+    // Already complete URL
+    if (
+      cleanUrl.startsWith(
+        'http://'
+      ) ||
+      cleanUrl.startsWith(
+        'https://'
+      )
+    ) {
+      return cleanUrl;
+    }
+
+    // Backend normally returns:
+    //
+    // /api/prescriptions/:id/file/:token
+    //
+    if (
+      cleanUrl.startsWith('/')
+    ) {
+      return `${BASE_URL}${cleanUrl}`;
+    }
+
+    return `${BASE_URL}/${cleanUrl}`;
   };
 
-  const openPrescription = async (prescription) => {
+  // ===================================================
+  // OPEN PRESCRIPTION
+  // ===================================================
+
+  const openPrescription = async (
+    prescription
+  ) => {
     try {
-      const url = getFileUrl(prescription?.fileUrl);
+      const url =
+        getFileUrl(
+          prescription?.fileUrl
+        );
+
+      console.log(
+        '📄 Prescription URL:',
+        url
+      );
 
       if (!url) {
-        Alert.alert('File unavailable', 'Prescription file URL is missing.');
+        Alert.alert(
+          'File unavailable',
+          'Prescription file URL is missing.'
+        );
         return;
       }
 
-      const supported = await Linking.canOpenURL(url);
+      const supported =
+        await Linking.canOpenURL(
+          url
+        );
 
       if (!supported) {
         Alert.alert(
@@ -147,9 +236,15 @@ export default function PharmacyPrescriptions() {
         return;
       }
 
-      await Linking.openURL(url);
+      await Linking.openURL(
+        url
+      );
+
     } catch (error) {
-      console.log('Open prescription error:', error);
+      console.log(
+        '❌ Open prescription error:',
+        error
+      );
 
       Alert.alert(
         'Unable to open',
@@ -158,8 +253,18 @@ export default function PharmacyPrescriptions() {
     }
   };
 
-  const approvePrescription = async (prescription) => {
-    if (!prescription?._id) return;
+  // ===================================================
+  // APPROVE PRESCRIPTION
+  // ===================================================
+
+  const handleApprove = async (
+    prescription
+  ) => {
+    if (
+      !prescription?._id
+    ) {
+      return;
+    }
 
     Alert.alert(
       'Approve Prescription',
@@ -169,16 +274,15 @@ export default function PharmacyPrescriptions() {
           text: 'Cancel',
           style: 'cancel',
         },
+
         {
           text: 'Approve',
           onPress: async () => {
             try {
               setActionLoading(true);
 
-              await verifyPrescription(
-                prescription._id,
-                'approved',
-                ''
+              await approvePrescription(
+                prescription._id
               );
 
               Alert.alert(
@@ -186,16 +290,25 @@ export default function PharmacyPrescriptions() {
                 'Prescription approved successfully.'
               );
 
-              await loadPrescriptions(false);
+              await loadPrescriptions(
+                false
+              );
+
             } catch (error) {
-              console.log('Approve prescription error:', error);
+              console.log(
+                'Approve prescription error:',
+                error
+              );
 
               Alert.alert(
-                'Approval failed',
-                error?.message || 'Could not approve prescription.'
+                'Approval Failed',
+                error?.message ||
+                  'Unable to approve prescription.'
               );
             } finally {
-              setActionLoading(false);
+              setActionLoading(
+                false
+              );
             }
           },
         },
@@ -203,855 +316,1247 @@ export default function PharmacyPrescriptions() {
     );
   };
 
-  const openRejectModal = (prescription) => {
-    setSelectedPrescription(prescription);
-    setRejectionReason('');
-    setRejectModalVisible(true);
-  };
+  // ===================================================
+  // REJECT PRESCRIPTION
+  // ===================================================
 
-  const rejectPrescription = async () => {
-    if (!selectedPrescription?._id) return;
-
-    const reason = rejectionReason.trim();
-
-    if (!reason) {
-      Alert.alert(
-        'Reason required',
-        'Please enter a reason for rejecting this prescription.'
-      );
+  const handleReject = async (
+    prescription
+  ) => {
+    if (
+      !prescription?._id
+    ) {
       return;
     }
 
-    try {
-      setActionLoading(true);
+    Alert.prompt(
+      'Reject Prescription',
+      'Enter the reason for rejection:',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
 
-      await verifyPrescription(
-        selectedPrescription._id,
-        'rejected',
-        reason
-      );
+        {
+          text: 'Reject',
+          style: 'destructive',
 
-      setRejectModalVisible(false);
-      setSelectedPrescription(null);
-      setRejectionReason('');
+          onPress: async (
+            reason
+          ) => {
+            const rejectionReason =
+              String(
+                reason || ''
+              ).trim();
 
-      Alert.alert(
-        'Prescription Rejected',
-        'The customer prescription has been rejected.'
-      );
+            if (
+              !rejectionReason
+            ) {
+              Alert.alert(
+                'Reason Required',
+                'Please enter a rejection reason.'
+              );
+              return;
+            }
 
-      await loadPrescriptions(false);
-    } catch (error) {
-      console.log('Reject prescription error:', error);
+            try {
+              setActionLoading(
+                true
+              );
 
-      Alert.alert(
-        'Rejection failed',
-        error?.message || 'Could not reject prescription.'
-      );
-    } finally {
-      setActionLoading(false);
-    }
+              await rejectPrescription(
+                prescription._id,
+                rejectionReason
+              );
+
+              Alert.alert(
+                'Prescription Rejected',
+                'Prescription rejected successfully.'
+              );
+
+              await loadPrescriptions(
+                false
+              );
+
+            } catch (error) {
+              console.log(
+                'Reject prescription error:',
+                error
+              );
+
+              Alert.alert(
+                'Rejection Failed',
+                error?.message ||
+                  'Unable to reject prescription.'
+              );
+            } finally {
+              setActionLoading(
+                false
+              );
+            }
+          },
+        },
+      ],
+      'plain-text'
+    );
   };
 
-  const pendingCount = prescriptions.filter(
-    (item) => item.status === 'pending'
-  ).length;
+  // ===================================================
+  // RENDER PRESCRIPTION CARD
+  // ===================================================
 
-  const approvedCount = prescriptions.filter(
-    (item) => item.status === 'approved'
-  ).length;
+  const renderPrescription = ({
+    item,
+  }) => {
+    const status =
+      getStatusStyle(
+        item?.status
+      );
 
-  const rejectedCount = prescriptions.filter(
-    (item) => item.status === 'rejected'
-  ).length;
+    const customerName =
+      item?.customer?.name ||
+      item?.customer?.email ||
+      'Customer';
 
-  const formatDate = (date) => {
-    if (!date) return '-';
+    const customerEmail =
+      item?.customer?.email ||
+      '';
 
-    try {
-      const parsed = new Date(date);
+    const medicines =
+      Array.isArray(
+        item?.medicines
+      )
+        ? item.medicines
+        : [];
 
-      if (Number.isNaN(parsed.getTime())) {
-        return String(date);
-      }
+    const createdDate =
+      item?.createdAt
+        ? new Date(
+            item.createdAt
+          ).toLocaleString()
+        : 'Date unavailable';
 
-      return parsed.toLocaleDateString('en-IN', {
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric',
-      });
-    } catch {
-      return String(date);
-    }
-  };
-
-  return (
-    <View style={styles.screen}>
-      <ScrollView
-        style={styles.container}
-        contentContainerStyle={styles.contentContainer}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={COLORS.green}
-          />
+    return (
+      <View
+        style={
+          styles.card
         }
       >
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => router.back()}
-            activeOpacity={0.8}
+        {/* =========================================
+            HEADER
+        ========================================= */}
+
+        <View
+          style={
+            styles.cardHeader
+          }
+        >
+          <View
+            style={
+              styles.headerLeft
+            }
           >
-            <Text style={styles.backText}>‹</Text>
-          </TouchableOpacity>
-
-          <View style={styles.headerInfo}>
-            <Text style={styles.headerTitle}>
-              Prescriptions
+            <Text
+              style={
+                styles.prescriptionTitle
+              }
+            >
+              Prescription
             </Text>
 
-            <Text style={styles.headerSubtitle}>
-              Verify customer prescriptions
+            <Text
+              style={
+                styles.dateText
+              }
+            >
+              {createdDate}
             </Text>
           </View>
 
-          <View style={styles.headerIcon}>
-            <Text style={styles.headerIconText}>RX</Text>
-          </View>
-        </View>
-
-        <View style={styles.summaryRow}>
-          <View style={styles.summaryCard}>
-            <Text style={styles.summaryNumber}>
-              {pendingCount}
-            </Text>
-            <Text style={styles.summaryLabel}>
-              Pending
-            </Text>
-          </View>
-
-          <View style={styles.summaryCard}>
-            <Text style={[styles.summaryNumber, styles.greenNumber]}>
-              {approvedCount}
-            </Text>
-            <Text style={styles.summaryLabel}>
-              Approved
-            </Text>
-          </View>
-
-          <View style={styles.summaryCard}>
-            <Text style={[styles.summaryNumber, styles.redNumber]}>
-              {rejectedCount}
-            </Text>
-            <Text style={styles.summaryLabel}>
-              Rejected
+          <View
+            style={[
+              styles.statusBadge,
+              status.badge,
+            ]}
+          >
+            <Text
+              style={[
+                styles.statusText,
+                status.text,
+              ]}
+            >
+              {status.label}
             </Text>
           </View>
         </View>
 
-        {loading ? (
-          <View style={styles.loadingBox}>
-            <ActivityIndicator
-              size="large"
-              color={COLORS.green}
-            />
+        {/* =========================================
+            CUSTOMER
+        ========================================= */}
 
-            <Text style={styles.loadingTitle}>
-              Loading prescriptions
+        <View
+          style={
+            styles.infoSection
+          }
+        >
+          <Text
+            style={
+              styles.sectionTitle
+            }
+          >
+            Customer
+          </Text>
+
+          <Text
+            style={
+              styles.customerName
+            }
+          >
+            {customerName}
+          </Text>
+
+          {customerEmail ? (
+            <Text
+              style={
+                styles.emailText
+              }
+            >
+              {customerEmail}
+            </Text>
+          ) : null}
+        </View>
+
+        {/* =========================================
+            ORDER
+        ========================================= */}
+
+        {item?.order ? (
+          <View
+            style={
+              styles.infoSection
+            }
+          >
+            <Text
+              style={
+                styles.sectionTitle
+              }
+            >
+              Order
             </Text>
 
-            <Text style={styles.loadingText}>
-              Checking customer submissions...
+            <Text
+              style={
+                styles.normalText
+              }
+            >
+              {item.order.orderNumber ||
+                item.order._id ||
+                'Order'}
             </Text>
+
+            {item.order.orderStatus ? (
+              <Text
+                style={
+                  styles.secondaryText
+                }
+              >
+                Status:{' '}
+                {
+                  item.order
+                    .orderStatus
+                }
+              </Text>
+            ) : null}
           </View>
-        ) : prescriptions.length === 0 ? (
-          <View style={styles.emptyBox}>
-            <View style={styles.emptyIcon}>
-              <Text style={styles.emptyIconText}>RX</Text>
-            </View>
+        ) : null}
 
-            <Text style={styles.emptyTitle}>
-              No prescriptions yet
+        {/* =========================================
+            MEDICINES
+        ========================================= */}
+
+        {medicines.length > 0 ? (
+          <View
+            style={
+              styles.infoSection
+            }
+          >
+            <Text
+              style={
+                styles.sectionTitle
+              }
+            >
+              Medicines
             </Text>
 
-            <Text style={styles.emptyText}>
-              Customer-uploaded prescriptions will appear here for verification.
-            </Text>
-          </View>
-        ) : (
-          <View style={styles.list}>
-            {prescriptions.map((item, index) => {
-              const status = getStatusStyle(item.status);
-
-              const customerName =
-                item.customer?.name ||
-                item.customer?.email ||
-                'Customer';
-
-              const customerEmail =
-                item.customer?.email || '-';
-
-              return (
+            {medicines.map(
+              (
+                medicine,
+                index
+              ) => (
                 <View
-                  key={item._id || index}
-                  style={styles.card}
+                  key={
+                    medicine?._id ||
+                    index
+                  }
+                  style={
+                    styles.medicineRow
+                  }
                 >
-                  <View style={styles.cardTop}>
-                    <View style={styles.fileIcon}>
-                      <Text style={styles.fileIconText}>
-                        {item.fileType === 'pdf' ? 'PDF' : 'IMG'}
-                      </Text>
-                    </View>
-
-                    <View style={styles.fileInfo}>
-                      <Text
-                        style={styles.fileName}
-                        numberOfLines={2}
-                      >
-                        {item.originalName ||
-                          item.fileName ||
-                          'Prescription'}
-                      </Text>
-
-                      <Text style={styles.dateText}>
-                        Uploaded {formatDate(item.createdAt)}
-                      </Text>
-                    </View>
-
-                    <View style={[styles.statusBadge, status.badge]}>
-                      <Text style={[styles.statusText, status.text]}>
-                        {status.label}
-                      </Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.customerBox}>
-                    <View style={styles.customerRow}>
-                      <Text style={styles.customerLabel}>
-                        Customer
-                      </Text>
-
-                      <Text style={styles.customerValue}>
-                        {customerName}
-                      </Text>
-                    </View>
-
-                    <View style={styles.customerRow}>
-                      <Text style={styles.customerLabel}>
-                        Email
-                      </Text>
-
-                      <Text
-                        style={styles.customerValue}
-                        numberOfLines={1}
-                      >
-                        {customerEmail}
-                      </Text>
-                    </View>
-                  </View>
-
-                  {item.rejectionReason ? (
-                    <View style={styles.reasonBox}>
-                      <Text style={styles.reasonTitle}>
-                        Rejection reason
-                      </Text>
-
-                      <Text style={styles.reasonText}>
-                        {item.rejectionReason}
-                      </Text>
-                    </View>
-                  ) : null}
-
-                  <TouchableOpacity
-                    style={styles.viewButton}
-                    onPress={() => openPrescription(item)}
-                    activeOpacity={0.85}
+                  <Text
+                    style={
+                      styles.medicineName
+                    }
                   >
-                    <Text style={styles.viewButtonText}>
-                      View Prescription
+                    {medicine?.name ||
+                      'Medicine'}
+                  </Text>
+
+                  {medicine?.brand ? (
+                    <Text
+                      style={
+                        styles.secondaryText
+                      }
+                    >
+                      {medicine.brand}
                     </Text>
-                  </TouchableOpacity>
-
-                  {item.status === 'pending' ? (
-                    <View style={styles.actionRow}>
-                      <TouchableOpacity
-                        style={styles.rejectButton}
-                        onPress={() => openRejectModal(item)}
-                        disabled={actionLoading}
-                        activeOpacity={0.85}
-                      >
-                        <Text style={styles.rejectButtonText}>
-                          Reject
-                        </Text>
-                      </TouchableOpacity>
-
-                      <TouchableOpacity
-                        style={styles.approveButton}
-                        onPress={() => approvePrescription(item)}
-                        disabled={actionLoading}
-                        activeOpacity={0.85}
-                      >
-                        <Text style={styles.approveButtonText}>
-                          Approve
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
-                  ) : null}
-
-                  {item.status === 'approved' ? (
-                    <View style={styles.approvedInfo}>
-                      <Text style={styles.approvedInfoText}>
-                        ✓ Verified and approved
-                      </Text>
-
-                      {item.verifiedAt ? (
-                        <Text style={styles.verifiedDate}>
-                          {formatDate(item.verifiedAt)}
-                        </Text>
-                      ) : null}
-                    </View>
                   ) : null}
                 </View>
-              );
-            })}
+              )
+            )}
           </View>
-        )}
+        ) : null}
 
-        <View style={styles.bottomSpace} />
-      </ScrollView>
+        {/* =========================================
+            FILE INFO
+        ========================================= */}
 
-      <Modal
-        visible={rejectModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => {
-          if (!actionLoading) {
-            setRejectModalVisible(false);
+        <View
+          style={
+            styles.fileSection
           }
-        }}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>
-              Reject Prescription
+        >
+          <Text
+            style={
+              styles.fileIcon
+            }
+          >
+            📄
+          </Text>
+
+          <View
+            style={
+              styles.fileInfo
+            }
+          >
+            <Text
+              style={
+                styles.fileName
+              }
+              numberOfLines={2}
+            >
+              {item?.originalName ||
+                item?.fileName ||
+                'Prescription file'}
             </Text>
 
-            <Text style={styles.modalSubtitle}>
-              Enter a clear reason so the customer knows why the prescription was rejected.
+            <Text
+              style={
+                styles.fileType
+              }
+            >
+              {item?.fileType ===
+              'pdf'
+                ? 'PDF'
+                : 'Image'}
+            </Text>
+          </View>
+        </View>
+
+        {/* =========================================
+            REJECTION REASON
+        ========================================= */}
+
+        {item?.status ===
+          'rejected' &&
+        item?.rejectionReason ? (
+          <View
+            style={
+              styles.rejectionBox
+            }
+          >
+            <Text
+              style={
+                styles.rejectionTitle
+              }
+            >
+              Rejection Reason
             </Text>
 
-            <TextInput
-              style={styles.reasonInput}
-              placeholder="Example: Prescription is expired or unreadable"
-              placeholderTextColor="#9AA6A1"
-              value={rejectionReason}
-              onChangeText={setRejectionReason}
-              multiline
-              textAlignVertical="top"
-              editable={!actionLoading}
-            />
+            <Text
+              style={
+                styles.rejectionText
+              }
+            >
+              {
+                item.rejectionReason
+              }
+            </Text>
+          </View>
+        ) : null}
 
-            <View style={styles.modalActions}>
+        {/* =========================================
+            ACTION BUTTONS
+        ========================================= */}
+
+        <View
+          style={
+            styles.actionContainer
+          }
+        >
+          {/* VIEW */}
+
+          <TouchableOpacity
+            style={
+              styles.viewButton
+            }
+            activeOpacity={0.8}
+            onPress={() =>
+              openPrescription(
+                item
+              )
+            }
+            disabled={
+              actionLoading
+            }
+          >
+            <Text
+              style={
+                styles.viewButtonText
+              }
+            >
+              View Prescription
+            </Text>
+          </TouchableOpacity>
+
+          {/* APPROVE / REJECT */}
+
+          {item?.status ===
+          'pending' ? (
+            <View
+              style={
+                styles.reviewRow
+              }
+            >
               <TouchableOpacity
-                style={styles.modalCancelButton}
-                onPress={() => {
-                  if (!actionLoading) {
-                    setRejectModalVisible(false);
-                  }
-                }}
-                disabled={actionLoading}
+                style={
+                  styles.approveButton
+                }
+                activeOpacity={0.8}
+                onPress={() =>
+                  handleApprove(
+                    item
+                  )
+                }
+                disabled={
+                  actionLoading
+                }
               >
-                <Text style={styles.modalCancelText}>
-                  Cancel
+                <Text
+                  style={
+                    styles.approveText
+                  }
+                >
+                  Approve
                 </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.modalRejectButton}
-                onPress={rejectPrescription}
-                disabled={actionLoading}
+                style={
+                  styles.rejectButton
+                }
+                activeOpacity={0.8}
+                onPress={() =>
+                  handleReject(
+                    item
+                  )
+                }
+                disabled={
+                  actionLoading
+                }
               >
-                {actionLoading ? (
-                  <ActivityIndicator color={COLORS.white} />
-                ) : (
-                  <Text style={styles.modalRejectText}>
-                    Reject
-                  </Text>
-                )}
+                <Text
+                  style={
+                    styles.rejectText
+                  }
+                >
+                  Reject
+                </Text>
               </TouchableOpacity>
             </View>
+          ) : null}
+        </View>
+      </View>
+    );
+  };
+
+  // ===================================================
+  // LOADING
+  // ===================================================
+
+  if (
+    loading &&
+    !refreshing
+  ) {
+    return (
+      <SafeAreaView
+        style={
+          styles.container
+        }
+      >
+        <View
+          style={
+            styles.loadingContainer
+          }
+        >
+          <ActivityIndicator
+            size="large"
+          />
+
+          <Text
+            style={
+              styles.loadingText
+            }
+          >
+            Loading prescriptions...
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // ===================================================
+  // MAIN UI
+  // ===================================================
+
+  return (
+    <SafeAreaView
+      style={
+        styles.container
+      }
+    >
+      <View
+        style={
+          styles.header
+        }
+      >
+        <View>
+          <Text
+            style={
+              styles.headerTitle
+            }
+          >
+            Prescriptions
+          </Text>
+
+          <Text
+            style={
+              styles.headerSubtitle
+            }
+          >
+            Review customer prescriptions
+          </Text>
+        </View>
+
+        <View
+          style={
+            styles.countBadge
+          }
+        >
+          <Text
+            style={
+              styles.countText
+            }
+          >
+            {prescriptions.length}
+          </Text>
+        </View>
+      </View>
+
+      {/* =========================================
+          SUMMARY
+      ========================================= */}
+
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={
+          false
+        }
+        contentContainerStyle={
+          styles.summaryContainer
+        }
+      >
+        <View
+          style={
+            styles.summaryCard
+          }
+        >
+          <Text
+            style={
+              styles.summaryNumber
+            }
+          >
+            {
+              prescriptions.filter(
+                (item) =>
+                  item?.status ===
+                  'pending'
+              ).length
+            }
+          </Text>
+
+          <Text
+            style={
+              styles.summaryLabel
+            }
+          >
+            Pending
+          </Text>
+        </View>
+
+        <View
+          style={
+            styles.summaryCard
+          }
+        >
+          <Text
+            style={
+              styles.summaryNumber
+            }
+          >
+            {
+              prescriptions.filter(
+                (item) =>
+                  item?.status ===
+                  'approved'
+              ).length
+            }
+          </Text>
+
+          <Text
+            style={
+              styles.summaryLabel
+            }
+          >
+            Approved
+          </Text>
+        </View>
+
+        <View
+          style={
+            styles.summaryCard
+          }
+        >
+          <Text
+            style={
+              styles.summaryNumber
+            }
+          >
+            {
+              prescriptions.filter(
+                (item) =>
+                  item?.status ===
+                  'rejected'
+              ).length
+            }
+          </Text>
+
+          <Text
+            style={
+              styles.summaryLabel
+            }
+          >
+            Rejected
+          </Text>
+        </View>
+      </ScrollView>
+
+      {/* =========================================
+          PRESCRIPTION LIST
+      ========================================= */}
+
+      <FlatList
+        data={
+          prescriptions
+        }
+        keyExtractor={(
+          item,
+          index
+        ) =>
+          String(
+            item?._id ||
+              item?.id ||
+              index
+          )
+        }
+        renderItem={
+          renderPrescription
+        }
+        contentContainerStyle={
+          prescriptions.length ===
+          0
+            ? styles.emptyList
+            : styles.listContainer
+        }
+        refreshControl={
+          <RefreshControl
+            refreshing={
+              refreshing
+            }
+            onRefresh={
+              onRefresh
+            }
+          />
+        }
+        showsVerticalScrollIndicator={
+          false
+        }
+        ListEmptyComponent={
+          <View
+            style={
+              styles.emptyContainer
+            }
+          >
+            <Text
+              style={
+                styles.emptyIcon
+              }
+            >
+              📄
+            </Text>
+
+            <Text
+              style={
+                styles.emptyTitle
+              }
+            >
+              No Prescriptions
+            </Text>
+
+            <Text
+              style={
+                styles.emptyText
+              }
+            >
+              Customer prescriptions
+              will appear here.
+            </Text>
+          </View>
+        }
+      />
+
+      {/* =========================================
+          GLOBAL ACTION LOADING
+      ========================================= */}
+
+      {actionLoading ? (
+        <View
+          style={
+            styles.actionLoadingOverlay
+          }
+        >
+          <View
+            style={
+              styles.actionLoadingBox
+            }
+          >
+            <ActivityIndicator
+              size="large"
+            />
+
+            <Text
+              style={
+                styles.actionLoadingText
+              }
+            >
+              Updating prescription...
+            </Text>
           </View>
         </View>
-      </Modal>
-    </View>
+      ) : null}
+    </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-  },
-
-  container: {
-    flex: 1,
-  },
-
-  contentContainer: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 30,
-  },
-
-  header: {
-    backgroundColor: COLORS.white,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    padding: 15,
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 14,
-    elevation: 2,
-  },
-
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: COLORS.muted,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 11,
-  },
-
-  backText: {
-    fontSize: 30,
-    color: COLORS.text,
-    lineHeight: 32,
-    marginTop: -3,
-  },
-
-  headerInfo: {
-    flex: 1,
-  },
-
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '900',
-    color: COLORS.text,
-  },
-
-  headerSubtitle: {
-    fontSize: 10,
-    color: COLORS.textSecondary,
-    marginTop: 3,
-  },
-
-  headerIcon: {
-    width: 43,
-    height: 43,
-    borderRadius: 12,
-    backgroundColor: COLORS.greenLight,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-
-  headerIconText: {
-    fontSize: 12,
-    fontWeight: '900',
-    color: COLORS.green,
-  },
-
-  summaryRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 14,
-  },
-
-  summaryCard: {
-    width: '31.5%',
-    backgroundColor: COLORS.white,
-    borderRadius: 13,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    paddingVertical: 13,
-    alignItems: 'center',
-  },
-
-  summaryNumber: {
-    fontSize: 20,
-    fontWeight: '900',
-    color: COLORS.orange,
-  },
-
-  greenNumber: {
-    color: COLORS.green,
-  },
-
-  redNumber: {
-    color: COLORS.red,
-  },
-
-  summaryLabel: {
-    fontSize: 9,
-    color: COLORS.textSecondary,
-    marginTop: 3,
-    fontWeight: '700',
-  },
-
-  loadingBox: {
-    backgroundColor: COLORS.white,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    paddingVertical: 50,
-    alignItems: 'center',
-  },
-
-  loadingTitle: {
-    marginTop: 13,
-    fontSize: 14,
-    fontWeight: '900',
-    color: COLORS.text,
-  },
-
-  loadingText: {
-    marginTop: 4,
-    fontSize: 10,
-    color: COLORS.textSecondary,
-  },
-
-  emptyBox: {
-    backgroundColor: COLORS.white,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    paddingVertical: 45,
-    paddingHorizontal: 25,
-    alignItems: 'center',
-  },
-
-  emptyIcon: {
-    width: 58,
-    height: 58,
-    borderRadius: 17,
-    backgroundColor: COLORS.greenLight,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 13,
-  },
-
-  emptyIconText: {
-    fontSize: 13,
-    fontWeight: '900',
-    color: COLORS.green,
-  },
-
-  emptyTitle: {
-    fontSize: 16,
-    fontWeight: '900',
-    color: COLORS.text,
-    textAlign: 'center',
-  },
-
-  emptyText: {
-    marginTop: 6,
-    fontSize: 11,
-    lineHeight: 17,
-    color: COLORS.textSecondary,
-    textAlign: 'center',
-  },
-
-  list: {
-    gap: 11,
-  },
-
-  card: {
-    backgroundColor: COLORS.white,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    padding: 14,
-    elevation: 1,
-  },
-
-  cardTop: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-  },
-
-  fileIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 13,
-    backgroundColor: COLORS.blueLight,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 10,
-  },
-
-  fileIconText: {
-    fontSize: 10,
-    fontWeight: '900',
-    color: COLORS.blue,
-  },
-
-  fileInfo: {
-    flex: 1,
-    paddingRight: 6,
-  },
-
-  fileName: {
-    fontSize: 13,
-    fontWeight: '900',
-    color: COLORS.text,
-    lineHeight: 18,
-  },
-
-  dateText: {
-    fontSize: 9,
-    color: COLORS.textSecondary,
-    marginTop: 4,
-  },
-
-  statusBadge: {
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-  },
-
-  statusText: {
-    fontSize: 8,
-    fontWeight: '900',
-    letterSpacing: 0.3,
-  },
-
-  pendingBadge: {
-    backgroundColor: COLORS.orangeLight,
-  },
-
-  pendingText: {
-    color: COLORS.orange,
-  },
-
-  approvedBadge: {
-    backgroundColor: COLORS.greenLight,
-  },
-
-  approvedText: {
-    color: COLORS.green,
-  },
-
-  rejectedBadge: {
-    backgroundColor: COLORS.redLight,
-  },
-
-  rejectedText: {
-    color: COLORS.red,
-  },
-
-  customerBox: {
-    backgroundColor: COLORS.muted,
-    borderRadius: 11,
-    padding: 10,
-    marginTop: 12,
-  },
-
-  customerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-
-  customerRowLast: {
-    marginBottom: 0,
-  },
-
-  customerLabel: {
-    width: 65,
-    fontSize: 9,
-    color: COLORS.textSecondary,
-    fontWeight: '700',
-  },
-
-  customerValue: {
-    flex: 1,
-    fontSize: 10,
-    color: COLORS.text,
-    fontWeight: '800',
-  },
-
-  reasonBox: {
-    backgroundColor: COLORS.redLight,
-    borderRadius: 10,
-    padding: 10,
-    marginTop: 10,
-  },
-
-  reasonTitle: {
-    fontSize: 9,
-    fontWeight: '900',
-    color: COLORS.red,
-  },
-
-  reasonText: {
-    fontSize: 10,
-    color: COLORS.text,
-    marginTop: 4,
-    lineHeight: 15,
-  },
-
-  viewButton: {
-    height: 42,
-    borderRadius: 11,
-    backgroundColor: COLORS.blueLight,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 11,
-  },
-
-  viewButtonText: {
-    color: COLORS.blue,
-    fontSize: 11,
-    fontWeight: '900',
-  },
-
-  actionRow: {
-    flexDirection: 'row',
-    gap: 9,
-    marginTop: 9,
-  },
-
-  rejectButton: {
-    flex: 1,
-    height: 42,
-    borderRadius: 11,
-    backgroundColor: COLORS.redLight,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-
-  rejectButtonText: {
-    color: COLORS.red,
-    fontSize: 11,
-    fontWeight: '900',
-  },
-
-  approveButton: {
-    flex: 1,
-    height: 42,
-    borderRadius: 11,
-    backgroundColor: COLORS.green,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-
-  approveButtonText: {
-    color: COLORS.white,
-    fontSize: 11,
-    fontWeight: '900',
-  },
-
-  approvedInfo: {
-    marginTop: 10,
-    backgroundColor: COLORS.greenLight,
-    borderRadius: 10,
-    padding: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-
-  approvedInfoText: {
-    color: COLORS.green,
-    fontSize: 10,
-    fontWeight: '900',
-  },
-
-  verifiedDate: {
-    color: COLORS.textSecondary,
-    fontSize: 9,
-  },
-
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    justifyContent: 'center',
-    padding: 20,
-  },
-
-  modalCard: {
-    backgroundColor: COLORS.white,
-    borderRadius: 18,
-    padding: 18,
-  },
-
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '900',
-    color: COLORS.text,
-  },
-
-  modalSubtitle: {
-    fontSize: 10,
-    color: COLORS.textSecondary,
-    lineHeight: 16,
-    marginTop: 5,
-    marginBottom: 13,
-  },
-
-  reasonInput: {
-    minHeight: 105,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 12,
-    padding: 12,
-    fontSize: 12,
-    color: COLORS.text,
-    backgroundColor: COLORS.background,
-  },
-
-  modalActions: {
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 13,
-  },
-
-  modalCancelButton: {
-    flex: 1,
-    height: 44,
-    borderRadius: 11,
-    backgroundColor: COLORS.muted,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-
-  modalCancelText: {
-    color: COLORS.textSecondary,
-    fontSize: 11,
-    fontWeight: '900',
-  },
-
-  modalRejectButton: {
-    flex: 1,
-    height: 44,
-    borderRadius: 11,
-    backgroundColor: COLORS.red,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-
-  modalRejectText: {
-    color: COLORS.white,
-    fontSize: 11,
-    fontWeight: '900',
-  },
-
-  bottomSpace: {
-    height: 20,
-  },
-});
+// =====================================================
+// STYLES
+// =====================================================
+
+const styles =
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor:
+        '#F7F8FA',
+    },
+
+    // ================================================
+    // HEADER
+    // ================================================
+
+    header: {
+      paddingHorizontal: 20,
+      paddingTop: 18,
+      paddingBottom: 14,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent:
+        'space-between',
+    },
+
+    headerTitle: {
+      fontSize: 25,
+      fontWeight: '800',
+      color: '#111827',
+    },
+
+    headerSubtitle: {
+      marginTop: 4,
+      fontSize: 13,
+      color: '#6B7280',
+    },
+
+    countBadge: {
+      minWidth: 42,
+      height: 42,
+      paddingHorizontal: 10,
+      borderRadius: 21,
+      alignItems: 'center',
+      justifyContent:
+        'center',
+      backgroundColor:
+        '#E8F1FF',
+    },
+
+    countText: {
+      fontSize: 16,
+      fontWeight: '800',
+      color: '#2563EB',
+    },
+
+    // ================================================
+    // SUMMARY
+    // ================================================
+
+    summaryContainer: {
+      paddingHorizontal: 16,
+      paddingBottom: 10,
+      gap: 10,
+    },
+
+    summaryCard: {
+      width: 105,
+      minHeight: 78,
+      borderRadius: 14,
+      backgroundColor:
+        '#FFFFFF',
+      padding: 12,
+      justifyContent:
+        'center',
+      borderWidth: 1,
+      borderColor:
+        '#E5E7EB',
+    },
+
+    summaryNumber: {
+      fontSize: 22,
+      fontWeight: '800',
+      color: '#111827',
+    },
+
+    summaryLabel: {
+      marginTop: 2,
+      fontSize: 12,
+      color: '#6B7280',
+    },
+
+    // ================================================
+    // LIST
+    // ================================================
+
+    listContainer: {
+      paddingHorizontal: 16,
+      paddingTop: 6,
+      paddingBottom: 30,
+    },
+
+    emptyList: {
+      flexGrow: 1,
+      justifyContent:
+        'center',
+      padding: 30,
+    },
+
+    // ================================================
+    // CARD
+    // ================================================
+
+    card: {
+      backgroundColor:
+        '#FFFFFF',
+      borderRadius: 18,
+      padding: 16,
+      marginBottom: 14,
+      borderWidth: 1,
+      borderColor:
+        '#E5E7EB',
+
+      shadowOpacity: 0.04,
+      shadowRadius: 6,
+      shadowOffset: {
+        width: 0,
+        height: 2,
+      },
+
+      elevation: 2,
+    },
+
+    cardHeader: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      justifyContent:
+        'space-between',
+      marginBottom: 15,
+    },
+
+    headerLeft: {
+      flex: 1,
+      paddingRight: 10,
+    },
+
+    prescriptionTitle: {
+      fontSize: 17,
+      fontWeight: '800',
+      color: '#111827',
+    },
+
+    dateText: {
+      marginTop: 4,
+      fontSize: 12,
+      color: '#6B7280',
+    },
+
+    // ================================================
+    // STATUS
+    // ================================================
+
+    statusBadge: {
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 20,
+    },
+
+    statusText: {
+      fontSize: 10,
+      fontWeight: '800',
+    },
+
+    pendingBadge: {
+      backgroundColor:
+        '#FEF3C7',
+    },
+
+    pendingText: {
+      color: '#92400E',
+    },
+
+    approvedBadge: {
+      backgroundColor:
+        '#DCFCE7',
+    },
+
+    approvedText: {
+      color: '#166534',
+    },
+
+    rejectedBadge: {
+      backgroundColor:
+        '#FEE2E2',
+    },
+
+    rejectedText: {
+      color: '#991B1B',
+    },
+
+    // ================================================
+    // INFO
+    // ================================================
+
+    infoSection: {
+      marginBottom: 14,
+      paddingTop: 2,
+    },
+
+    sectionTitle: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: '#9CA3AF',
+      textTransform:
+        'uppercase',
+      marginBottom: 5,
+      letterSpacing: 0.5,
+    },
+
+    customerName: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: '#1F2937',
+    },
+
+    emailText: {
+      marginTop: 2,
+      fontSize: 12,
+      color: '#6B7280',
+    },
+
+    normalText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: '#374151',
+    },
+
+    secondaryText: {
+      marginTop: 2,
+      fontSize: 12,
+      color: '#6B7280',
+    },
+
+    // ================================================
+    // MEDICINES
+    // ================================================
+
+    medicineRow: {
+      paddingVertical: 5,
+      paddingHorizontal: 10,
+      marginBottom: 5,
+      borderRadius: 8,
+      backgroundColor:
+        '#F9FAFB',
+    },
+
+    medicineName: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: '#374151',
+    },
+
+    // ================================================
+    // FILE
+    // ================================================
+
+    fileSection: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      padding: 12,
+      marginBottom: 12,
+      borderRadius: 12,
+      backgroundColor:
+        '#F3F4F6',
+    },
+
+    fileIcon: {
+      fontSize: 26,
+      marginRight: 10,
+    },
+
+    fileInfo: {
+      flex: 1,
+    },
+
+    fileName: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: '#374151',
+    },
+
+    fileType: {
+      marginTop: 3,
+      fontSize: 11,
+      color: '#6B7280',
+      textTransform:
+        'uppercase',
+    },
+
+    // ================================================
+    // REJECTION
+    // ================================================
+
+    rejectionBox: {
+      padding: 12,
+      marginBottom: 12,
+      borderRadius: 10,
+      backgroundColor:
+        '#FEF2F2',
+      borderWidth: 1,
+      borderColor:
+        '#FECACA',
+    },
+
+    rejectionTitle: {
+      fontSize: 12,
+      fontWeight: '800',
+      color: '#991B1B',
+      marginBottom: 4,
+    },
+
+    rejectionText: {
+      fontSize: 13,
+      color: '#7F1D1D',
+      lineHeight: 19,
+    },
+
+    // ================================================
+    // ACTIONS
+    // ================================================
+
+    actionContainer: {
+      marginTop: 2,
+    },
+
+    viewButton: {
+      minHeight: 46,
+      borderRadius: 11,
+      alignItems: 'center',
+      justifyContent:
+        'center',
+      backgroundColor:
+        '#2563EB',
+      paddingHorizontal: 15,
+    },
+
+    viewButtonText: {
+      color: '#FFFFFF',
+      fontSize: 14,
+      fontWeight: '800',
+    },
+
+    reviewRow: {
+      flexDirection: 'row',
+      gap: 10,
+      marginTop: 10,
+    },
+
+    approveButton: {
+      flex: 1,
+      minHeight: 44,
+      borderRadius: 10,
+      alignItems: 'center',
+      justifyContent:
+        'center',
+      backgroundColor:
+        '#16A34A',
+    },
+
+    approveText: {
+      color: '#FFFFFF',
+      fontSize: 14,
+      fontWeight: '800',
+    },
+
+    rejectButton: {
+      flex: 1,
+      minHeight: 44,
+      borderRadius: 10,
+      alignItems: 'center',
+      justifyContent:
+        'center',
+      backgroundColor:
+        '#DC2626',
+    },
+
+    rejectText: {
+      color: '#FFFFFF',
+      fontSize: 14,
+      fontWeight: '800',
+    },
+
+    // ================================================
+    // LOADING
+    // ================================================
+
+    loadingContainer: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent:
+        'center',
+    },
+
+    loadingText: {
+      marginTop: 12,
+      fontSize: 14,
+      color: '#6B7280',
+    },
+
+    // ================================================
+    // EMPTY
+    // ================================================
+
+    emptyContainer: {
+      alignItems: 'center',
+      justifyContent:
+        'center',
+      padding: 30,
+    },
+
+    emptyIcon: {
+      fontSize: 46,
+      marginBottom: 12,
+    },
+
+    emptyTitle: {
+      fontSize: 18,
+      fontWeight: '800',
+      color: '#111827',
+    },
+
+    emptyText: {
+      marginTop: 6,
+      textAlign: 'center',
+      fontSize: 13,
+      color: '#6B7280',
+      lineHeight: 20,
+    },
+
+    // ================================================
+    // ACTION LOADING
+    // ================================================
+
+    actionLoadingOverlay: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      top: 0,
+      bottom: 0,
+      alignItems: 'center',
+      justifyContent:
+        'center',
+      backgroundColor:
+        'rgba(0,0,0,0.18)',
+    },
+
+    actionLoadingBox: {
+      minWidth: 190,
+      padding: 22,
+      borderRadius: 15,
+      alignItems: 'center',
+      backgroundColor:
+        '#FFFFFF',
+    },
+
+    actionLoadingText: {
+      marginTop: 12,
+      fontSize: 13,
+      fontWeight: '600',
+      color: '#374151',
+    },
+  });
